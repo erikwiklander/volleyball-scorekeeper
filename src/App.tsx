@@ -336,9 +336,6 @@ export default function App() {
           setSyncFlash((current) =>
             current ? { ...current, saved: true } : undefined,
           );
-          setNotice(
-            'Sync marker saved. Align the first white flash frame with its exported timestamp.',
-          );
         },
       );
     }, 250);
