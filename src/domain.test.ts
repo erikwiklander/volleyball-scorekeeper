@@ -11,6 +11,8 @@ import {
   setScore,
   startSet,
   syncMarker,
+  saveAppearance,
+  matchResult,
   type Snapshot,
 } from './domain';
 import { gameBackup, importBackup, matchCsv, tournamentBackup } from './export';
@@ -209,8 +211,9 @@ describe('numbered camera markers and team colors', () => {
     expect(first.homeScore).toBe(1);
     delete first.syncNumber; // An older backup has unnumbered markers.
     endSet(data, 'm', data.sets[0].id, at);
-    expect(syncMarker(data, 'm', at).syncNumber).toBe(2);
+    expect(() => syncMarker(data, 'm', at)).toThrow();
     startSet(data, 'm', at);
+    expect(syncMarker(data, 'm', at).syncNumber).toBe(2);
     const third = syncMarker(data, 'm', at);
     expect(third.syncNumber).toBe(3);
     expect(third.homeScore).toBe(0);
@@ -231,9 +234,9 @@ describe('numbered camera markers and team colors', () => {
       importBackup(tournamentBackup(legacy, 't'), emptySnapshot()),
     ).not.toThrow();
   });
-  it('supports a sync before play begins and rejects completed matches', () => {
+  it('requires an active set for new syncs and rejects completed matches', () => {
     const pending = fixture();
-    expect(syncMarker(pending, 'm', at).setId).toBeUndefined();
+    expect(() => syncMarker(pending, 'm', at)).toThrow();
     expect(pending.matches[0].status).toBe('not_started');
     endSet(data, 'm', data.sets[0].id, at);
     completeMatch(data, 'm', at);
@@ -269,5 +272,156 @@ describe('standalone games', () => {
     const backup = gameBackup(standalone, 'm');
     backup.matches[0].tournamentId = 'missing';
     expect(() => importBackup(backup, emptySnapshot())).toThrow();
+  });
+});
+
+describe('reusable teams and version 2 backups', () => {
+  const logo = 'data:image/png;base64,aGVsbG8=';
+  function appearance() {
+    const home = saveAppearance(
+      data,
+      {
+        name: 'Roots',
+        shortName: 'ROOTS',
+        primaryColor: '#008000',
+        secondaryColor: '#ffffff',
+        logo,
+      },
+      new Date(at).toISOString(),
+    );
+    Object.assign(data.matches[0], {
+      home,
+      homeTeam: home.displayName,
+      homeColor: home.color,
+    });
+    data.tournaments[0].defaultTeamId = home.teamId;
+    return home;
+  }
+  it('keeps match appearance independent of team edits and overrides', () => {
+    const home = appearance();
+    const override = saveAppearance(
+      data,
+      {
+        ...data.teams[0],
+        teamId: home.teamId,
+        primaryColor: '#000000',
+        name: 'Roots Green',
+      },
+      new Date(at).toISOString(),
+    );
+    expect(data.teams).toHaveLength(1);
+    expect(data.teams[0].primaryColor).toBe('#008000');
+    expect(override.color).toBe('#000000');
+    data.teams[0].name = 'Renamed';
+    data.teams[0].logo = undefined;
+    expect(home.displayName).toBe('Roots');
+    expect(home.logo).toBe(logo);
+    expect(home.color).toBe('#008000');
+  });
+  it('round trips logos, defaults and appearances with remapped team references', () => {
+    const home = appearance();
+    const marker = syncMarker(data, 'm', at);
+    marker.syncCue = 'black-white-black-v1';
+    const backup = tournamentBackup(data, 't');
+    expect(backup.schemaVersion).toBe(2);
+    const restored = emptySnapshot();
+    importBackup(backup, restored);
+    expect(restored.teams[0].id).not.toBe(home.teamId);
+    expect(restored.matches[0].home?.teamId).toBe(restored.teams[0].id);
+    expect(restored.tournaments[0].defaultTeamId).toBe(restored.teams[0].id);
+    expect(restored.matches[0].home?.logo).toBe(logo);
+    expect(restored.teams[0].secondaryColor).toBe('#ffffff');
+    expect(restored.events.at(-1)?.syncCue).toBe('black-white-black-v1');
+    expect(restored.events.at(-1)?.setId).toBe(restored.sets[0].id);
+  });
+  it('rejects dangling team references atomically', () => {
+    appearance();
+    const backup = tournamentBackup(data, 't');
+    backup.teams = [];
+    const restored = emptySnapshot();
+    expect(() => importBackup(backup, restored)).toThrow();
+    expect(restored).toEqual(emptySnapshot());
+  });
+  it('still imports real version 1 backups including unattached legacy sync markers', () => {
+    const pending = fixture();
+    const backup = {
+      ...tournamentBackup(pending, 't'),
+      schemaVersion: 1,
+      teams: undefined,
+    };
+    backup.events = [
+      {
+        id: 'old-sync',
+        tournamentId: 't',
+        matchId: 'm',
+        timestamp: new Date(at).toISOString(),
+        epochMs: at,
+        sequence: 1,
+        action: 'SYNC_MARKER',
+        homeScore: 0,
+        awayScore: 0,
+      },
+    ];
+    const restored = emptySnapshot();
+    importBackup(backup, restored);
+    expect(restored.teams).toEqual([]);
+    expect(restored.matches[0].homeTeam).toBe(pending.matches[0].homeTeam);
+    expect(restored.events[0].setId).toBeUndefined();
+  });
+  it('preserves completed set results through team metadata changes', () => {
+    appearance();
+    point('HOME_POINT');
+    endSet(data, 'm', data.sets[0].id, at);
+    startSet(data, 'm', at);
+    point('AWAY_POINT');
+    point('AWAY_POINT');
+    point('UNDO');
+    endSet(data, 'm', data.sets[1].id, at);
+    expect(matchResult(data, 'm')).toEqual({ home: 1, away: 1, tied: 0 });
+    expect(setScore(data, data.sets[0].id)).toEqual({
+      homeScore: 1,
+      awayScore: 0,
+    });
+  });
+  it('rejects a sync when another tab has changed the active set', () => {
+    const first = data.sets[0].id;
+    endSet(data, 'm', first, at);
+    startSet(data, 'm', at);
+    expect(() => syncMarker(data, 'm', at, first)).toThrow();
+    expect(syncMarker(data, 'm', at, data.sets[1].id).setNumber).toBe(2);
+  });
+  it('upgrades a version 1 database without changing saved scores or events', async () => {
+    const { openDB } = await import('idb');
+    const name = crypto.randomUUID();
+    const legacy = await openDB(name, 1, {
+      upgrade(db) {
+        for (const store of [
+          'tournaments',
+          'matches',
+          'sets',
+          'events',
+          'appState',
+        ])
+          db.createObjectStore(store, { keyPath: 'id' });
+      },
+    });
+    point('HOME_POINT');
+    for (const store of ['tournaments', 'matches', 'sets', 'events'] as const) {
+      for (const item of data[store]) await legacy.put(store, item);
+    }
+    await legacy.put('appState', data.appState);
+    legacy.close();
+    const upgraded = await openDatabase(name);
+    const restored = await readSnapshot(upgraded);
+    expect(restored).toEqual(data);
+    await mutate(upgraded, (d) => {
+      saveAppearance(
+        d,
+        { name: 'New team', primaryColor: '#008000' },
+        new Date(at).toISOString(),
+      );
+    });
+    expect((await readSnapshot(upgraded)).teams).toHaveLength(1);
+    upgraded.close();
   });
 });

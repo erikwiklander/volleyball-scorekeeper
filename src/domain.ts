@@ -1,8 +1,27 @@
+export interface Team {
+  id: string;
+  name: string;
+  shortName?: string;
+  logo?: string;
+  primaryColor: string;
+  secondaryColor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface MatchTeam {
+  teamId: string;
+  displayName: string;
+  shortName?: string;
+  color: string;
+  secondaryColor?: string;
+  logo?: string;
+}
 export interface Tournament {
   id: string;
   name: string;
   date?: string;
   location?: string;
+  defaultTeamId?: string;
   defaultTeamName?: string;
   defaultTeamShortName?: string;
   createdAt: string;
@@ -11,6 +30,8 @@ export interface Tournament {
 export interface Match {
   id: string;
   tournamentId?: string;
+  home?: MatchTeam;
+  away?: MatchTeam;
   homeTeam: string;
   awayTeam: string;
   homeColor?: string;
@@ -53,6 +74,7 @@ export interface ScoreEvent {
   awayScore: number;
   targetEventId?: string;
   syncNumber?: number;
+  syncCue?: 'black-white-black-v1';
 }
 export interface AppState {
   id: 'current';
@@ -61,6 +83,7 @@ export interface AppState {
   activeSetId?: string;
 }
 export interface Snapshot {
+  teams: Team[];
   tournaments: Tournament[];
   matches: Match[];
   sets: VolleyballSet[];
@@ -68,6 +91,7 @@ export interface Snapshot {
   appState: AppState;
 }
 export const emptySnapshot = (): Snapshot => ({
+  teams: [],
   tournaments: [],
   matches: [],
   sets: [],
@@ -254,10 +278,59 @@ export function completeMatch(data: Snapshot, matchId: string, at: number) {
     data.appState = { id: 'current', activeTournamentId: match.tournamentId };
 }
 
-export function syncMarker(data: Snapshot, matchId: string, at: number) {
+export function syncMarker(
+  data: Snapshot,
+  matchId: string,
+  at: number,
+  expectedSetId?: string,
+) {
   const match = data.matches.find((m) => m.id === matchId);
   if (!match || match.status === 'completed')
     throw new Error('This match is no longer active.');
   const set = data.sets.find((s) => s.matchId === matchId && !s.completedAt);
+  if (!set || (expectedSetId && set.id !== expectedSetId))
+    throw new Error(
+      'Start or reopen the active set before adding a sync marker.',
+    );
   return appendEvent(data, match, 'SYNC_MARKER', at, set);
+}
+
+export interface TeamDraft {
+  teamId?: string;
+  name: string;
+  shortName?: string;
+  primaryColor: string;
+  secondaryColor?: string;
+  logo?: string;
+}
+export function saveAppearance(
+  data: Snapshot,
+  draft: TeamDraft,
+  now: string,
+): MatchTeam {
+  if (!draft.name.trim()) throw new Error('Enter both team names.');
+  let teamId = draft.teamId;
+  if (teamId && !data.teams.some((t) => t.id === teamId))
+    throw new Error('Selected team no longer exists.');
+  if (!teamId) {
+    teamId = id();
+    data.teams.push({
+      id: teamId,
+      name: draft.name.trim(),
+      shortName: draft.shortName,
+      primaryColor: draft.primaryColor,
+      secondaryColor: draft.secondaryColor,
+      logo: draft.logo,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return {
+    teamId,
+    displayName: draft.name.trim(),
+    shortName: draft.shortName,
+    color: draft.primaryColor,
+    secondaryColor: draft.secondaryColor,
+    logo: draft.logo,
+  };
 }

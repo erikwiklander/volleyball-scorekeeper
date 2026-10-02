@@ -1,6 +1,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { emptySnapshot, type Snapshot } from './domain';
 const stores = [
+  'teams',
   'tournaments',
   'matches',
   'sets',
@@ -8,8 +9,10 @@ const stores = [
   'appState',
 ] as const;
 export function openDatabase(name = 'volleyball-scorekeeper') {
-  return openDB(name, 1, {
-    upgrade(db) {
+  return openDB(name, 2, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 2) db.createObjectStore('teams', { keyPath: 'id' });
+      if (oldVersion >= 1) return;
       db.createObjectStore('tournaments', { keyPath: 'id' });
       db.createObjectStore('matches', { keyPath: 'id' }).createIndex(
         'tournamentId',
@@ -28,11 +31,12 @@ export function openDatabase(name = 'volleyball-scorekeeper') {
 }
 export async function readSnapshot(db: IDBPDatabase): Promise<Snapshot> {
   const tx = db.transaction([...stores], 'readonly');
-  const [tournaments, matches, sets, events, state] = await Promise.all(
+  const [teams, tournaments, matches, sets, events, state] = await Promise.all(
     stores.map((s) => tx.objectStore(s).getAll()),
   );
   await tx.done;
   return {
+    teams,
     tournaments,
     matches,
     sets,
@@ -48,10 +52,10 @@ export async function mutate(
 ): Promise<Snapshot> {
   const tx = db.transaction([...stores], 'readwrite', { durability: 'strict' });
   try {
-    const [tournaments, matches, sets, events, state] = await Promise.all(
-      stores.map((s) => tx.objectStore(s).getAll()),
-    );
+    const [teams, tournaments, matches, sets, events, state] =
+      await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
     const data: Snapshot = {
+      teams,
       tournaments,
       matches,
       sets,
@@ -60,7 +64,13 @@ export async function mutate(
     };
     const before = structuredClone(data);
     change(data);
-    for (const name of ['tournaments', 'matches', 'sets', 'events'] as const) {
+    for (const name of [
+      'teams',
+      'tournaments',
+      'matches',
+      'sets',
+      'events',
+    ] as const) {
       const old = new Map(before[name].map((item) => [item.id, item]));
       const remaining = new Set(data[name].map((item) => item.id));
       for (const item of before[name])

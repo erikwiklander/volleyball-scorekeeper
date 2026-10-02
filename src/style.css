@@ -897,3 +897,94 @@ dialog.sync-flash {
     width: 100%;
   }
 }
+
+.team-fields,
+.match-setup {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.team-fields details {
+  margin: 12px 0;
+}
+.team-fields summary {
+  cursor: pointer;
+  padding: 10px 0;
+}
+.team-fields .check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.check-label input {
+  width: auto;
+}
+.match-team-setup {
+  padding: 12px 0;
+}
+.team-logo,
+.logo-preview img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.logo-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.team-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #777;
+  flex-shrink: 0;
+}
+.team-list {
+  display: grid;
+  gap: 8px;
+}
+.team-list .list-card {
+  justify-content: flex-start;
+  gap: 12px;
+}
+.team-library {
+  margin: 28px 0;
+}
+select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cbd1c4;
+  border-radius: 8px;
+  background: white;
+  color: #102d27;
+  font: inherit;
+}
+
+dialog.sync-black,
+dialog.sync-blackAfter {
+  background: #000;
+}
+dialog.sync-white {
+  background: #fff;
+}
+.sync-set {
+  font-size: 2rem;
+  font-weight: 800;
+}
+.build-version {
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.score-button .team-logo {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+}
+.score-button {
+  position: relative;
+}

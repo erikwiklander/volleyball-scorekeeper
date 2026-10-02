@@ -1,3 +1,5 @@
+import { MatchSetup, TeamLibrary } from './Teams';
+import { saveAppearance, type TeamDraft } from './domain';
 import {
   useEffect,
   useLayoutEffect,
@@ -65,6 +67,7 @@ export default function App() {
   const [data, setData] = useState<Snapshot>(emptySnapshot);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [logoLoading, setLogoLoading] = useState(false);
   const saving = useRef(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -80,6 +83,8 @@ export default function App() {
     home: string;
     away: string;
     saved: boolean;
+    setNumber: number;
+    phase: 'black' | 'white' | 'blackAfter' | 'info';
   }>();
   const syncDialog = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
@@ -87,8 +92,24 @@ export default function App() {
     else syncDialog.current?.close();
   }, [syncFlash]);
   useEffect(() => {
-    if (!syncFlash?.saved) return;
-    const timer = window.setTimeout(() => setSyncFlash(undefined), 3000);
+    if (!syncFlash || syncFlash.phase === 'black') return;
+    const { phase, saved } = syncFlash;
+    if (phase === 'info' && !saved) return;
+    const timer = window.setTimeout(
+      () => {
+        setSyncFlash((current) =>
+          current
+            ? phase === 'info'
+              ? undefined
+              : {
+                  ...current,
+                  phase: phase === 'white' ? 'blackAfter' : 'info',
+                }
+            : undefined,
+        );
+      },
+      phase === 'info' ? 3000 : 200,
+    );
     return () => window.clearTimeout(timer);
   }, [syncFlash]);
   const db = useRef<IDBPDatabase>(undefined);
@@ -262,32 +283,57 @@ export default function App() {
     );
   }
   function flashSync() {
-    if (!match || syncFlash) return;
-    void commit(
-      (d) => {
-        // Capture the instant at the visual transition, after the DB read, not
-        // after the save completes. The dialog remains pending until committed.
-        const event = syncMarker(d, match.id, Date.now());
-        const latest = d.matches.find((m) => m.id === match.id)!;
-        flushSync(() =>
-          setSyncFlash({
-            number: event.syncNumber!,
-            timestamp: event.timestamp,
-            home: latest.homeTeam,
-            away: latest.awayTeam,
-            saved: false,
-          }),
-        );
-      },
-      () => {
-        setSyncFlash((current) =>
-          current ? { ...current, saved: true } : undefined,
-        );
-        setNotice(
-          'Sync marker saved. Match the first bright frame to its exported timestamp.',
-        );
-      },
+    if (!match || !currentSet || syncFlash || saving.current) return;
+    const matchId = match.id;
+    const setId = currentSet.id;
+    flushSync(() =>
+      setSyncFlash({
+        number: 0,
+        timestamp: '',
+        home: match.homeTeam,
+        away: match.awayTeam,
+        setNumber: currentSet.setNumber,
+        saved: false,
+        phase: 'black',
+      }),
     );
+    // First show black. The synchronization instant is the start of the white
+    // pulse, captured after the transaction read, immediately before DOM commit.
+    window.setTimeout(() => {
+      if (document.visibilityState !== 'visible') {
+        setSyncFlash(undefined);
+        setNotice('Sync interrupted. Keep the app visible and tap again.');
+        return;
+      }
+      void commit(
+        (d) => {
+          if (document.visibilityState !== 'visible')
+            throw new Error('Keep the app visible during sync.');
+          const event = syncMarker(d, matchId, Date.now(), setId);
+          event.syncCue = 'black-white-black-v1';
+          const latest = d.matches.find((m) => m.id === matchId)!;
+          flushSync(() =>
+            setSyncFlash({
+              number: event.syncNumber!,
+              timestamp: event.timestamp,
+              home: latest.homeTeam,
+              away: latest.awayTeam,
+              setNumber: event.setNumber!,
+              saved: false,
+              phase: 'white',
+            }),
+          );
+        },
+        () => {
+          setSyncFlash((current) =>
+            current ? { ...current, saved: true } : undefined,
+          );
+          setNotice(
+            'Sync marker saved. Align the first white flash frame with its exported timestamp.',
+          );
+        },
+      );
+    }, 250);
   }
   function exportTournament(t: Tournament) {
     download(
@@ -333,6 +379,7 @@ export default function App() {
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (logoLoading) return;
     const fields = new FormData(event.currentTarget);
     const value = (key: string) => String(fields.get(key) ?? '').trim();
     const at = Date.now();
@@ -348,6 +395,7 @@ export default function App() {
             name: value('name'),
             date: value('date') || undefined,
             location: value('location') || undefined,
+            defaultTeamId: value('defaultTeamId') || undefined,
             defaultTeamName: value('defaultTeamName') || undefined,
             defaultTeamShortName: value('defaultTeamShortName') || undefined,
             createdAt: existing?.createdAt ?? now,
@@ -364,20 +412,25 @@ export default function App() {
       );
     }
     if (modal?.kind === 'newMatch') {
-      if (!value('homeTeam') || !value('awayTeam')) return;
+      const homeDraft = JSON.parse(value('homeAppearance')) as TeamDraft;
+      const awayDraft = JSON.parse(value('awayAppearance')) as TeamDraft;
       const matchId = id();
       const tournamentId = modal.tournamentId;
       void commit(
         (d) => {
           if (tournamentId && !d.tournaments.some((t) => t.id === tournamentId))
             throw new Error('Tournament no longer exists.');
+          const home = saveAppearance(d, homeDraft, now);
+          const away = saveAppearance(d, awayDraft, now);
           d.matches.push({
             id: matchId,
             tournamentId,
-            homeTeam: value('homeTeam'),
-            awayTeam: value('awayTeam'),
-            homeColor: value('homeColor'),
-            awayColor: value('awayColor'),
+            home,
+            away,
+            homeTeam: home.displayName,
+            awayTeam: away.displayName,
+            homeColor: home.color,
+            awayColor: away.color,
             status: 'not_started',
             createdAt: now,
             updatedAt: now,
@@ -564,6 +617,18 @@ export default function App() {
                   </div>
                 )}
               </section>
+              <TeamLibrary
+                error={error}
+                teams={data.teams}
+                busy={busy}
+                onSave={(team, done) => {
+                  void commit((d) => {
+                    const existing = d.teams.find((t) => t.id === team.id);
+                    if (existing) Object.assign(existing, team);
+                    else d.teams.push(team);
+                  }, done);
+                }}
+              />
               <details className="optional-tournaments">
                 <summary>
                   Tournaments (optional) · {data.tournaments.length}
@@ -751,6 +816,13 @@ export default function App() {
                       aria-label={`Add point for ${match.homeTeam}`}
                     >
                       <span className="team-side">HOME</span>
+                      {match.home?.logo && (
+                        <img
+                          className="team-logo"
+                          src={match.home.logo}
+                          alt=""
+                        />
+                      )}
                       <span className="team-name">{match.homeTeam}</span>
                       <span className="score">{score.homeScore}</span>
                       <span className="point-label">+ POINT</span>
@@ -763,6 +835,13 @@ export default function App() {
                       aria-label={`Add point for ${match.awayTeam}`}
                     >
                       <span className="team-side">AWAY</span>
+                      {match.away?.logo && (
+                        <img
+                          className="team-logo"
+                          src={match.away.logo}
+                          alt=""
+                        />
+                      )}
                       <span className="team-name">{match.awayTeam}</span>
                       <span className="score">{score.awayScore}</span>
                       <span className="point-label">+ POINT</span>
@@ -843,12 +922,16 @@ export default function App() {
               )}
               {match.status !== 'completed' && (
                 <div className="sync-row">
-                  <button onClick={flashSync} disabled={busy || !!syncFlash}>
+                  <button
+                    onClick={flashSync}
+                    disabled={busy || !!syncFlash || !currentSet}
+                  >
                     ⊙ Video sync marker
                   </button>
                   <small>
-                    Face the camera, then tap to flash a numbered sync card for
-                    3 seconds.
+                    {currentSet
+                      ? 'Record this set, face the camera, then tap for the black–white–black flash.'
+                      : 'Start the next set before recording a sync marker.'}
                   </small>
                 </div>
               )}
@@ -969,20 +1052,24 @@ export default function App() {
       )}
       <footer>
         <span>VOLLEYBALL SCOREKEEPER</span>
-        <span>Made for the sidelines.</span>
+        <span className="build-version" title={`Built ${__BUILD_TIME__}`}>
+          v{__APP_VERSION__} · {__BUILD_REVISION__}
+        </span>
       </footer>
       <dialog
         ref={syncDialog}
-        className="sync-flash"
+        className={`sync-flash sync-${syncFlash?.phase ?? 'info'}`}
         aria-label="Video synchronization marker"
         onCancel={(e) => {
-          if (!syncFlash?.saved) e.preventDefault();
+          if (!syncFlash?.saved || syncFlash.phase !== 'info')
+            e.preventDefault();
           else setSyncFlash(undefined);
         }}
       >
-        {syncFlash && (
+        {syncFlash?.phase === 'info' && (
           <div className="sync-card">
             <p className="sync-title">SYNC {syncFlash.number}</p>
+            <p className="sync-set">SET {syncFlash.setNumber}</p>
             <h2>
               {syncFlash.home}
               <span>vs</span>
@@ -1002,11 +1089,11 @@ export default function App() {
       <dialog
         ref={dialog}
         onCancel={(e) => {
-          if (busy) e.preventDefault();
+          if (busy || logoLoading) e.preventDefault();
           else setModal(undefined);
         }}
         onClose={() => {
-          if (!busy) setModal(undefined);
+          if (!busy && !logoLoading) setModal(undefined);
         }}
       >
         {modal && (
@@ -1066,6 +1153,20 @@ export default function App() {
                   </label>
                 </div>
                 <label>
+                  Default saved team
+                  <select
+                    name="defaultTeamId"
+                    defaultValue={modal.tournament?.defaultTeamId ?? ''}
+                  >
+                    <option value="">None</option>
+                    {data.teams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Default team name
                   <input
                     name="defaultTeamName"
@@ -1086,75 +1187,18 @@ export default function App() {
               </>
             )}
             {modal.kind === 'newMatch' && (
-              <>
-                <label>
-                  Home team
-                  <input
-                    name="homeTeam"
-                    required
-                    maxLength={100}
-                    defaultValue={
-                      data.tournaments.find((t) => t.id === modal.tournamentId)
-                        ?.defaultTeamName
-                    }
-                  />
-                </label>
-                <label className="team-color">
-                  Home team color
-                  <input
-                    type="color"
-                    name="homeColor"
-                    defaultValue={HOME_COLOR}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="swap"
-                  onClick={(e) => {
-                    const form = e.currentTarget.form!;
-                    const home = form.elements.namedItem(
-                      'homeTeam',
-                    ) as HTMLInputElement;
-                    const away = form.elements.namedItem(
-                      'awayTeam',
-                    ) as HTMLInputElement;
-                    [home.value, away.value] = [away.value, home.value];
-                    const homeColor = form.elements.namedItem(
-                      'homeColor',
-                    ) as HTMLInputElement;
-                    const awayColor = form.elements.namedItem(
-                      'awayColor',
-                    ) as HTMLInputElement;
-                    [homeColor.value, awayColor.value] = [
-                      awayColor.value,
-                      homeColor.value,
-                    ];
-                  }}
-                >
-                  ⇅ Swap home / away
-                </button>
-                <label>
-                  Away team
-                  <input
-                    name="awayTeam"
-                    required
-                    maxLength={100}
-                    placeholder="Opponent name"
-                  />
-                </label>
-                <label className="team-color">
-                  Away team color
-                  <input
-                    type="color"
-                    name="awayColor"
-                    defaultValue={AWAY_COLOR}
-                  />
-                </label>
-                <p className="muted">
-                  Pick colors you’ll recognize on court. You’ll start Set 1 when
-                  play begins.
-                </p>
-              </>
+              <MatchSetup
+                teams={data.teams}
+                defaultTeamId={
+                  data.tournaments.find((t) => t.id === modal.tournamentId)
+                    ?.defaultTeamId
+                }
+                defaultTeamName={
+                  data.tournaments.find((t) => t.id === modal.tournamentId)
+                    ?.defaultTeamName
+                }
+                onLoading={setLogoLoading}
+              />
             )}
             {modal.kind === 'endSet' &&
               (() => {
@@ -1208,7 +1252,7 @@ export default function App() {
             <div className="dialog-actions">
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || logoLoading}
                 onClick={() => {
                   setModal(undefined);
                   setError('');
@@ -1220,7 +1264,7 @@ export default function App() {
                 <button
                   type="button"
                   className="primary"
-                  disabled={busy}
+                  disabled={busy || logoLoading}
                   onClick={() => {
                     const at = Date.now();
                     void commit(
@@ -1237,7 +1281,7 @@ export default function App() {
               ) : (
                 <button
                   type="submit"
-                  disabled={busy}
+                  disabled={busy || logoLoading}
                   className={modal.kind === 'delete' ? 'danger' : 'primary'}
                 >
                   {busy

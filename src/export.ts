@@ -2,11 +2,36 @@ import { z } from 'zod';
 import { actions, id, orderedEvents, type Snapshot } from './domain';
 const text = z.string().min(1);
 const time = z.iso.datetime();
+const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+// Embedded raster images remain available offline and cannot load remote content.
+const logo = z
+  .string()
+  .max(1_500_000)
+  .regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/);
+const teamSchema = z.object({
+  id: text,
+  name: text,
+  shortName: z.string().optional(),
+  logo: logo.optional(),
+  primaryColor: color,
+  secondaryColor: color.optional(),
+  createdAt: time,
+  updatedAt: time,
+});
+const appearanceSchema = z.object({
+  teamId: text,
+  displayName: text,
+  shortName: z.string().optional(),
+  color,
+  secondaryColor: color.optional(),
+  logo: logo.optional(),
+});
 const tournamentSchema = z.object({
   id: text,
   name: text,
   date: z.string().optional(),
   location: z.string().optional(),
+  defaultTeamId: text.optional(),
   defaultTeamName: z.string().optional(),
   defaultTeamShortName: z.string().optional(),
   createdAt: time,
@@ -15,6 +40,8 @@ const tournamentSchema = z.object({
 const matchSchema = z.object({
   id: text,
   tournamentId: text.optional(),
+  home: appearanceSchema.optional(),
+  away: appearanceSchema.optional(),
   homeTeam: text,
   awayTeam: text,
   homeColor: z
@@ -51,24 +78,38 @@ const eventSchema = z.object({
   homeScore: z.number().int().nonnegative(),
   awayScore: z.number().int().nonnegative(),
   targetEventId: text.optional(),
+  syncCue: z.literal('black-white-black-v1').optional(),
   syncNumber: z.number().int().positive().optional(),
 });
 const backupSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  teams: z.array(teamSchema).default([]),
   tournament: tournamentSchema.optional(),
   matches: z.array(matchSchema),
   sets: z.array(setSchema),
   events: z.array(eventSchema),
 });
+function referencedTeams(
+  data: Snapshot,
+  matches: Snapshot['matches'],
+  defaultTeamId?: string,
+) {
+  const ids = new Set([
+    defaultTeamId,
+    ...matches.flatMap((m) => [m.home?.teamId, m.away?.teamId]),
+  ]);
+  return data.teams.filter((team) => ids.has(team.id));
+}
 export function tournamentBackup(data: Snapshot, tournamentId: string) {
   const tournament = data.tournaments.find((t) => t.id === tournamentId);
   if (!tournament) throw new Error('Tournament not found.');
   const matches = data.matches.filter((m) => m.tournamentId === tournamentId);
   const ids = new Set(matches.map((m) => m.id));
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     exportedAt: new Date().toISOString(),
     tournament,
+    teams: referencedTeams(data, matches, tournament.defaultTeamId),
     matches,
     sets: data.sets.filter((s) => ids.has(s.matchId)),
     events: orderedEvents(data.events.filter((e) => ids.has(e.matchId))),
@@ -79,8 +120,9 @@ export function gameBackup(data: Snapshot, matchId: string) {
   if (!match || match.tournamentId)
     throw new Error('Standalone game not found.');
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     exportedAt: new Date().toISOString(),
+    teams: referencedTeams(data, [match]),
     matches: [match],
     sets: data.sets.filter((s) => s.matchId === matchId),
     events: orderedEvents(data.events.filter((e) => e.matchId === matchId)),
@@ -92,12 +134,31 @@ export function importBackup(raw: unknown, data: Snapshot) {
     throw new Error('A game backup must contain exactly one game.');
   const all = [
     ...(backup.tournament ? [backup.tournament] : []),
+    ...backup.teams,
     ...backup.matches,
     ...backup.sets,
     ...backup.events,
   ];
   if (new Set(all.map((x) => x.id)).size !== all.length)
     throw new Error('Backup contains duplicate IDs.');
+  const teamIds = new Set(backup.teams.map((t) => t.id));
+  if (
+    backup.tournament?.defaultTeamId &&
+    !teamIds.has(backup.tournament.defaultTeamId)
+  )
+    throw new Error('Invalid default team reference.');
+  for (const match of backup.matches) {
+    for (const side of ['home', 'away'] as const) {
+      const appearance = match[side];
+      if (
+        appearance &&
+        (!teamIds.has(appearance.teamId) ||
+          appearance.displayName !== match[`${side}Team`] ||
+          appearance.color !== match[`${side}Color`])
+      )
+        throw new Error('Invalid match team appearance.');
+    }
+  }
   const matches = new Map(backup.matches.map((m) => [m.id, m]));
   const sets = new Map(backup.sets.map((s) => [s.id, s]));
   const events = new Map(backup.events.map((e) => [e.id, e]));
@@ -154,15 +215,21 @@ export function importBackup(raw: unknown, data: Snapshot) {
   const mapping = new Map(all.map((x) => [x.id, id()]));
   const remap = (value: string) => mapping.get(value)!;
   const offset = data.events.reduce((n, e) => Math.max(n, e.sequence), 0);
+  data.teams.push(...backup.teams.map((t) => ({ ...t, id: remap(t.id) })));
   if (backup.tournament)
     data.tournaments.push({
       ...backup.tournament,
       id: remap(backup.tournament.id),
+      defaultTeamId: backup.tournament.defaultTeamId
+        ? remap(backup.tournament.defaultTeamId)
+        : undefined,
     });
   data.matches.push(
     ...backup.matches.map((m) => ({
       ...m,
       id: remap(m.id),
+      home: m.home ? { ...m.home, teamId: remap(m.home.teamId) } : undefined,
+      away: m.away ? { ...m.away, teamId: remap(m.away.teamId) } : undefined,
       tournamentId: m.tournamentId ? remap(m.tournamentId) : undefined,
     })),
   );
@@ -206,8 +273,15 @@ export function matchCsv(data: Snapshot, matchId: string) {
     'set_id',
     'sequence',
     'sync_number',
+    'sync_cue',
     'home_color',
     'away_color',
+    'home_team_id',
+    'away_team_id',
+    'home_short_name',
+    'away_short_name',
+    'home_secondary_color',
+    'away_secondary_color',
   ];
   const escape = (value: unknown) =>
     `"${String(value ?? '').replaceAll('"', '""')}"`;
@@ -231,8 +305,15 @@ export function matchCsv(data: Snapshot, matchId: string) {
       e.setId,
       e.sequence,
       e.syncNumber,
+      e.syncCue,
       match.homeColor,
       match.awayColor,
+      match.home?.teamId,
+      match.away?.teamId,
+      match.home?.shortName,
+      match.away?.shortName,
+      match.home?.secondaryColor,
+      match.away?.secondaryColor,
     ]
       .map(escape)
       .join(','),

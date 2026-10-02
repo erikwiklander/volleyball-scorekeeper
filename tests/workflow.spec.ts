@@ -32,6 +32,15 @@ test('complete courtside workflow survives reload and works offline', async ({
   await expect(away.locator('.score')).toHaveText('1');
   await page.getByRole('button', { name: 'Undo last point' }).click();
   await expect(away.locator('.score')).toHaveText('0');
+  await page.evaluate(() => {
+    const dialog = document.querySelector('.sync-flash')!;
+    const phases: string[] = [];
+    const observer = new MutationObserver(() => {
+      phases.push(dialog.className);
+    });
+    observer.observe(dialog, { attributes: true, attributeFilter: ['class'] });
+    Object.assign(window, { syncPhases: phases });
+  });
   await page.getByRole('button', { name: 'Video sync marker' }).click();
   const syncCard = page.getByRole('dialog', {
     name: 'Video synchronization marker',
@@ -42,6 +51,16 @@ test('complete courtside workflow survives reload and works offline', async ({
   await expect(syncCard).toContainText('Manor');
   const firstSyncTime = await syncCard.locator('time').getAttribute('datetime');
   await expect(syncCard).toContainText('Marker saved');
+  await expect(syncCard).toContainText('SET 1');
+  const phases = await page.evaluate(
+    () => (window as unknown as { syncPhases: string[] }).syncPhases,
+  );
+  expect(phases).toEqual([
+    'sync-flash sync-black',
+    'sync-flash sync-white',
+    'sync-flash sync-blackAfter',
+    'sync-flash sync-info',
+  ]);
   await page.screenshot({ path: testInfo.outputPath('sync-mobile.png') });
   await expect(syncCard).not.toBeVisible({ timeout: 5000 });
   page.on('dialog', (dialog) => dialog.accept());
@@ -123,8 +142,8 @@ test('complete courtside workflow survives reload and works offline', async ({
   // WebKit's offline emulation also rejects local File.text() reads.
   if (browserName === 'webkit') await context.setOffline(false);
   const backupPath = (await backup.path())!;
-  expect(JSON.parse(await readFile(backupPath, 'utf8')).schemaVersion).toBe(1);
-  await page.locator('input[type=file]').setInputFiles({
+  expect(JSON.parse(await readFile(backupPath, 'utf8')).schemaVersion).toBe(2);
+  await page.getByLabel('Import backup').setInputFiles({
     name: 'tournament.json',
     mimeType: 'application/json',
     buffer: await readFile(backupPath),
@@ -278,13 +297,11 @@ test('one-off game needs no tournament and supports recovery, completion and bac
     path: testInfo.outputPath('one-off-home.png'),
     fullPage: true,
   });
-  await page
-    .locator('input[type=file]')
-    .setInputFiles({
-      name: 'game.json',
-      mimeType: 'application/json',
-      buffer: bytes,
-    });
+  await page.getByLabel('Import backup').setInputFiles({
+    name: 'game.json',
+    mimeType: 'application/json',
+    buffer: bytes,
+  });
   await expect(page.getByRole('status')).toHaveText(
     'Backup imported as a new game.',
   );
@@ -293,4 +310,116 @@ test('one-off game needs no tournament and supports recovery, completion and bac
   await expect(
     page.getByRole('heading', { name: 'Your games 2' }),
   ).toBeVisible();
+});
+
+test('saved teams, offline logos and match overrides survive edits, reload and backup', async ({
+  page,
+  context,
+  browserName,
+}, testInfo) => {
+  await page.goto('./');
+  await expect(page.getByText('Offline ready', { exact: true })).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: '+ Add team', exact: true }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Team name', { exact: true }).fill('Roots 15 Green');
+  await dialog.getByLabel('Team color', { exact: true }).fill('#008000');
+  await dialog.getByText('Short name, logo & secondary color').click();
+  await dialog.getByLabel('Team short name').fill('ROOTS');
+  await dialog.getByLabel('Use secondary color').check();
+  await dialog.getByLabel('Team secondary color').fill('#ffffff');
+  // WebKit offline emulation blocks local file reads, including blob images.
+  if (browserName === 'webkit') await context.setOffline(false);
+  await dialog.getByLabel('Team logo', { exact: true }).setInputFiles({
+    name: 'roots.png',
+    mimeType: 'image/png',
+    buffer: await readFile('public/icon-192.png'),
+  });
+  await expect(dialog.getByAltText('Roots 15 Green logo')).toBeVisible();
+  await context.setOffline(true);
+  await dialog.getByRole('button', { name: 'Save team', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Your teams 1' }),
+  ).toBeVisible();
+  await page.getByText('Tournaments (optional)', { exact: false }).click();
+  await page.getByRole('button', { name: '+ New tournament' }).click();
+  await page.getByLabel('Tournament name').fill('Team library cup');
+  await page
+    .getByLabel('Default saved team')
+    .selectOption({ label: 'Roots 15 Green' });
+  await page.getByRole('button', { name: 'Save tournament' }).click();
+  await page.getByRole('button', { name: '+ New match' }).click();
+  await expect(page.getByLabel('Home team', { exact: true })).toHaveValue(
+    'Roots 15 Green',
+  );
+  await page.getByLabel('Home team color', { exact: true }).fill('#0000ff');
+  await page.getByLabel('Away team', { exact: true }).fill('Austin Juniors');
+  await page.getByRole('button', { name: 'Swap home / away' }).click();
+  await expect(page.getByLabel('Away team', { exact: true })).toHaveValue(
+    'Roots 15 Green',
+  );
+  await expect(page.getByLabel('Away team color', { exact: true })).toHaveValue(
+    '#0000ff',
+  );
+  await page.getByRole('button', { name: 'Swap home / away' }).click();
+  await page.getByRole('button', { name: 'Create match' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Video sync marker' }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Start Set 1' }).click();
+  const home = page.getByRole('button', {
+    name: 'Add point for Roots 15 Green',
+  });
+  await expect(home).toHaveCSS('background-color', 'rgb(0, 0, 255)');
+  await expect(home.locator('img')).toBeVisible();
+  await home.click();
+  await page.getByRole('button', { name: 'Save & leave scoring' }).click();
+  await page.getByRole('button', { name: 'All tournaments' }).click();
+  await page
+    .locator('.team-list')
+    .getByRole('button', { name: 'Roots 15 Green ROOTS' })
+    .click();
+  dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Team name', { exact: true }).fill('Roots renamed');
+  await dialog.getByLabel('Team color', { exact: true }).fill('#ff0000');
+  await dialog.getByRole('button', { name: 'Save team', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.team-list')).toContainText('Roots renamed');
+  page.on('dialog', (d) => d.accept());
+  if (browserName === 'webkit') await context.setOffline(false);
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume match' }).click();
+  await expect(home.locator('.score')).toHaveText('1');
+  await expect(home).toHaveCSS('background-color', 'rgb(0, 0, 255)');
+  await expect(home.locator('img')).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('team-logo-scoring.png'),
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: 'Save & leave scoring' }).click();
+  const backupDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export tournament JSON' }).click();
+  const bytes = await readFile((await (await backupDownload).path())!);
+  const backup = JSON.parse(bytes.toString());
+  expect(backup.teams).toHaveLength(2);
+  expect(backup.matches[0].home.displayName).toBe('Roots 15 Green');
+  expect(backup.matches[0].home.logo).toMatch(/^data:image\/png;base64,/);
+  expect(
+    backup.teams.find((team: { name: string }) => team.name === 'Roots renamed')
+      .primaryColor,
+  ).toBe('#ff0000');
+  await page.getByRole('button', { name: 'All tournaments' }).click();
+  await page.getByLabel('Import backup').setInputFiles({
+    name: 'teams.json',
+    mimeType: 'application/json',
+    buffer: bytes,
+  });
+  await expect(page.getByRole('status')).toHaveText(
+    'Backup imported as a new tournament.',
+  );
+  await page
+    .getByRole('button', { name: /Roots 15 Green vs Austin Juniors/ })
+    .click();
+  await expect(home.locator('img')).toBeVisible();
+  await expect(home.locator('.score')).toHaveText('1');
 });

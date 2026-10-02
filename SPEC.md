@@ -1,112 +1,106 @@
-# Volleyball Scorekeeper PWA --- Product & Implementation Specification
+# Club Volleyball Scorekeeper, Live Scores & Video Score Bug
 
-## 1. Purpose
+## Product / Implementation Specification
 
-Build a simple, reliable, phone-first web application for recording
-volleyball scores during tournaments.
+### 1. Vision
 
-The scorekeeper records every scoring action with an accurate wall-clock
-timestamp. The resulting event data can later be synchronized with match
-video so a separate video-processing tool can render a scoreboard
-overlay at the correct times.
+Build a phone-first club-volleyball scoring system where each courtside
+scoring action serves three purposes:
 
-The application should work well for tournaments containing many matches
-and should retain tournament, match, set, and scoring history on the
-device.
+1.  Keep an authoritative local match record.
+2.  Optionally broadcast the live score to family and friends.
+3.  Create timestamped data that can later drive an automated, polished
+    score bug on recorded video.
 
-The first version should be intentionally small and require no backend,
-account, login, or internet connection during scoring.
+The system has three separate components sharing the same match/event
+model:
 
-------------------------------------------------------------------------
+-   **Scorekeeper PWA** - iPhone-first, offline-first courtside app.
+-   **Live Scores** - public realtime webpages backed by Firebase.
+-   **Video Renderer** - later Mac/desktop tool using FFmpeg to add a
+    broadcast-style score bug.
 
-## 2. Primary Goals
-
-1.  Make scoring a point require one obvious tap.
-2.  Record an accurate timestamp for every scoring action.
-3.  Make accidental scoring mistakes easy to undo.
-4.  Never lose an in-progress match because the browser sleeps, reloads,
-    closes, or navigates away.
-5.  Support multiple matches within a tournament.
-6.  Preserve completed tournaments and matches locally.
-7.  Export score/event data for later video processing.
-8.  Work offline after installation/loading.
-9.  Be installable as a PWA on iPhone and Android.
-10. Keep the UI simple enough to operate while watching a live
-    volleyball match.
+The scorekeeper is the core and must never depend on Firebase or the
+video renderer.
 
 ------------------------------------------------------------------------
 
-## 3. Non-Goals for V1
+## 2. Guiding Principles
 
-Do not implement these unless required by the core architecture:
+-   Reliability is more important than visual sophistication.
+-   Scoring must work with no internet connection.
+-   Persist every action locally immediately.
+-   IndexedDB is authoritative on the scoring phone.
+-   Firebase is only a synchronized broadcast copy.
+-   Never depend on a JavaScript stopwatch continuing in the background.
+-   Store absolute timestamps with millisecond precision.
+-   Event history is append-only and authoritative.
+-   Keep courtside interaction extremely simple.
+-   Reuse the same domain/event model for scoring, live scores, exports,
+    and video rendering.
 
--   User accounts
--   Authentication
--   Backend/API
--   Cloud synchronization
--   Multi-device synchronization
--   Player rosters
--   Player statistics
--   Rotations
--   Serving order
--   Lineups
--   Volleyball rule enforcement
--   Automatic winner detection beyond simple score display
--   Video editing/rendering
--   Video upload
--   Live public score sharing
--   Push notifications
+Suggested stack:
 
-The scorekeeper should record what the operator enters rather than
-attempt to referee the match.
-
-------------------------------------------------------------------------
-
-## 4. Target Platform
-
-Primary target:
-
--   iPhone using Safari / installed PWA
-
-Secondary targets:
-
--   Android Chrome
--   Desktop browsers for reviewing/exporting data
-
-Suggested implementation:
-
--   React
--   TypeScript
--   Vite
+-   React + TypeScript + Vite
 -   PWA/service worker
--   IndexedDB for persistent application data
-
-Avoid introducing a backend for V1.
+-   IndexedDB, preferably via Dexie
+-   Firebase Hosting + Firebase Realtime Database for live scores
+-   Node/TypeScript + FFmpeg for the future video renderer
 
 ------------------------------------------------------------------------
 
-## 5. Core Data Hierarchy
-
-The application data hierarchy is:
+## 3. Domain Model
 
 ``` text
+Team
 Tournament
   └── Match
+       ├── MatchTeam / appearance
        └── Set
-            └── Score Events
+            ├── Score Events
+            └── Sync Markers
 ```
 
-A tournament contains multiple matches.
+Each volleyball set is expected to have its own separate video
+recording.
 
-A match contains one or more sets.
+### Team
 
-Every score-changing action produces an immutable event.
+Teams are reusable across tournaments and matches.
 
-------------------------------------------------------------------------
+``` ts
+interface Team {
+  id: string;
+  name: string;
+  shortName?: string;
+  logo?: string;
+  primaryColor: string;
+  secondaryColor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
 
-## 6. Tournament Model
+A team such as `Roots 15 Green` should be configured once and reused.
+Opponents can also be saved for future matches.
 
-Suggested fields:
+### Match-specific appearance
+
+Jersey colors can change, so a match can override a team's default
+appearance.
+
+``` ts
+interface MatchTeam {
+  teamId: string;
+  displayName: string;
+  shortName?: string;
+  color: string;
+  secondaryColor?: string;
+  logo?: string;
+}
+```
+
+### Tournament
 
 ``` ts
 interface Tournament {
@@ -114,51 +108,13 @@ interface Tournament {
   name: string;
   date?: string;
   location?: string;
-
-  defaultTeamName?: string;
-  defaultTeamShortName?: string;
-
+  defaultTeamId?: string;
   createdAt: string;
   updatedAt: string;
 }
 ```
 
-Example:
-
-``` json
-{
-  "id": "tournament_01",
-  "name": "Grizzly Classic",
-  "date": "2026-09-12",
-  "defaultTeamName": "Vandegrift",
-  "defaultTeamShortName": "VHS"
-}
-```
-
-### Tournament behavior
-
-The user must be able to:
-
--   Create a tournament
--   View existing tournaments
--   Open a tournament
--   Edit tournament metadata
--   See all matches belonging to a tournament
--   Start a new match
--   Resume an unfinished match
--   Review a completed match
--   Export tournament data
--   Delete a tournament after confirmation
-
-Deleting a tournament deletes its matches and events.
-
-A strong confirmation should be required.
-
-------------------------------------------------------------------------
-
-## 7. Match Model
-
-Suggested fields:
+### Match
 
 ``` ts
 type MatchStatus = "not_started" | "in_progress" | "completed";
@@ -166,1007 +122,826 @@ type MatchStatus = "not_started" | "in_progress" | "completed";
 interface Match {
   id: string;
   tournamentId: string;
-
-  homeTeam: string;
-  awayTeam: string;
-
+  home: MatchTeam;
+  away: MatchTeam;
   status: MatchStatus;
-
   startedAt?: string;
   completedAt?: string;
-
   createdAt: string;
   updatedAt: string;
 }
 ```
 
-The app does not need to assume that the user's team is always home or
-away.
+Do not assume the user's club is always home.
 
-### Match list
-
-Example tournament screen:
-
-``` text
-Grizzly Classic
-September 12, 2026
-
-Vandegrift vs Manor          W 2-0
-Vandegrift vs Lake Travis    W 2-1
-Vandegrift vs Westlake       L 1-2
-
-+ New Match
-```
-
-An unfinished match should be visually obvious:
-
-``` text
-Vandegrift vs Westlake
-IN PROGRESS — Set 2 — 14-11
-```
-
-------------------------------------------------------------------------
-
-## 8. Set Model
-
-Suggested fields:
+### Set
 
 ``` ts
 interface VolleyballSet {
   id: string;
   matchId: string;
-
   setNumber: number;
-
-  homeScore: number;
-  awayScore: number;
-
   startedAt: string;
   completedAt?: string;
 }
 ```
 
-The displayed score may be derived from events rather than treated as
-authoritative persisted state.
-
-Event history should be the source of truth.
+Current scores should be reconstructed from events.
 
 ------------------------------------------------------------------------
 
-## 9. Score Event Model
+## 4. Event Model
 
-This is the most important data structure in the application.
-
-Suggested model:
+The event model is central to the product.
 
 ``` ts
-type ScoreAction =
+type MatchEventAction =
+  | "MATCH_STARTED"
+  | "SET_STARTED"
   | "HOME_POINT"
   | "AWAY_POINT"
   | "UNDO"
-  | "SET_STARTED"
+  | "SYNC_MARKER"
   | "SET_ENDED"
-  | "MATCH_STARTED"
-  | "MATCH_ENDED"
-  | "SYNC_MARKER";
+  | "MATCH_ENDED";
 
-interface ScoreEvent {
+interface MatchEvent {
   id: string;
-
   tournamentId: string;
   matchId: string;
   setId?: string;
   setNumber?: number;
 
-  timestamp: string;
-  epochMs: number;
+  timestamp: string; // ISO-8601 with offset
+  epochMs: number;   // authoritative instant
 
-  action: ScoreAction;
+  action: MatchEventAction;
 
   homeScore: number;
   awayScore: number;
 
   targetEventId?: string;
+  syncNumber?: number;
 }
 ```
 
-### Timestamp requirements
-
-Every event must store:
-
-1.  ISO-8601 wall-clock timestamp
-2.  Unix epoch timestamp in milliseconds
+Every event stores both an ISO timestamp and Unix epoch milliseconds.
 
 Example:
 
 ``` json
 {
-  "timestamp": "2026-09-12T19:14:32.183-05:00",
-  "epochMs": 1789258472183
+  "timestamp": "2026-10-02T14:42:17.382-05:00",
+  "epochMs": 1790960537382
 }
 ```
 
-Milliseconds should be preserved.
-
-Do not use an incrementing JavaScript timer as the authoritative clock.
-
-The timestamp should be captured when the scoring action occurs.
+Milliseconds must be preserved.
 
 ------------------------------------------------------------------------
 
-## 10. Immutable Event History
+## 5. Immutable History and Undo
 
-Scoring history should be append-only.
+Never delete a scoring event during ordinary correction.
 
-If the operator accidentally awards a point and presses Undo, do not
-delete the original point event.
-
-Instead create an `UNDO` event referring to the event being reversed.
-
-Example:
+If the wrong team receives a point, append an `UNDO` event referencing
+the event being reversed.
 
 ``` text
-19:14:32.183 HOME_POINT  12-9
-19:15:01.442 AWAY_POINT  12-10
-19:15:18.917 UNDO        12-9
-19:15:23.104 AWAY_POINT  12-10
+19:14:32.183  HOME_POINT  12-9
+19:15:01.442  AWAY_POINT  12-10
+19:15:18.917  UNDO        12-9
+19:15:23.104  AWAY_POINT  12-10
 ```
 
-This provides:
-
--   Recovery from mistakes
--   Auditability
--   Better video synchronization
--   Ability to reconstruct the exact scoring session
-
-The UI can present a simplified history while retaining the complete
-event log.
-
-------------------------------------------------------------------------
-
-## 11. Scoring Screen
-
-This is the most important UI.
-
-It should be optimized for portrait phone use and require minimal
-attention.
-
-Example:
-
-``` text
-Vandegrift vs Westlake
-SET 2
-
-┌─────────────────────────┐
-│      VANDEGRIFT         │
-│                         │
-│           14            │
-│                         │
-│         + POINT         │
-└─────────────────────────┘
-
-            14 - 11
-
-┌─────────────────────────┐
-│       WESTLAKE          │
-│                         │
-│           11            │
-│                         │
-│         + POINT         │
-└─────────────────────────┘
-
-            UNDO
-
-        END SET
-```
-
-Alternative side-by-side layout is acceptable on larger screens.
-
-### Requirements
-
-The point controls must:
-
--   Be very large
--   Be visually distinct
--   Have generous touch targets
--   Respond immediately
--   Avoid tiny controls near the scoring buttons
-
-A successful tap should provide subtle feedback such as:
-
--   Brief visual animation
--   Optional vibration using supported browser APIs
-
-Do not require confirmation for adding a normal point.
-
-------------------------------------------------------------------------
-
-## 12. Undo Behavior
-
-Undo must be easy to access but harder to trigger accidentally than a
-scoring button.
-
-Pressing Undo:
-
-1.  Finds the most recent active score-changing event.
-2.  Appends an `UNDO` event referencing it.
-3.  Recalculates the displayed score.
-4.  Immediately persists the new event.
-
-Undo should support repeated corrections.
-
-Example:
-
-``` text
-Home +1
-Away +1
-Away +1
-UNDO
-UNDO
-```
-
-Result should correctly reconstruct the state.
-
-Do not simply decrement whichever score currently appears.
-
-------------------------------------------------------------------------
-
-## 13. Set Management
-
-The user should explicitly start and end sets.
-
-### Start Set
-
-When starting a set:
-
--   Increment/set the set number
--   Reset displayed scores to 0-0
--   Create a `SET_STARTED` event
--   Persist immediately
-
-### End Set
-
-The user taps `End Set`.
-
-Display confirmation:
-
-``` text
-End Set 2?
-
-Vandegrift 25
-Westlake   21
-
-[Cancel] [End Set]
-```
-
-The app should not require scores to satisfy official volleyball winning
-rules.
-
-The operator may be recording unusual formats, shortened tournament
-sets, or corrections.
-
-------------------------------------------------------------------------
-
-## 14. Match Completion
-
-After ending a set, offer:
-
-``` text
-Start Set 3
-Complete Match
-```
-
-Completing the match creates a `MATCH_ENDED` event and records
-`completedAt`.
-
-Completed matches remain editable only through explicit
-correction/reopen functionality if implemented.
-
-For V1, reopening a completed match can be omitted if it significantly
-increases complexity.
-
-------------------------------------------------------------------------
-
-## 15. Persistence and Crash Recovery
-
-This is a critical requirement.
-
-Every meaningful action must be persisted immediately.
-
-Use IndexedDB rather than relying solely on React state.
-
-Persist:
-
--   Tournaments
--   Matches
--   Sets
--   Score events
--   Current active tournament
--   Current active match
--   Current active set
-
-If the browser:
-
--   Refreshes
--   Crashes
--   Is killed by iOS
--   Navigates away
--   Phone locks
--   PWA closes
-
-the user must be able to reopen the app and continue from the previously
-persisted state.
-
-Example:
-
-``` text
-Resume Match?
-
-Vandegrift vs Westlake
-Set 2
-14 - 11
-
-[Resume]
-```
-
-There should never be a requirement for the JavaScript process to remain
-running to preserve match timing.
-
-------------------------------------------------------------------------
-
-## 16. Screen Wake Lock
-
-While the scoring screen is active, request the Screen Wake Lock API
-where supported.
-
-Requirements:
-
--   Request wake lock when scoring begins/resumes.
--   Re-request when the page becomes visible again if necessary.
--   Gracefully handle unsupported browsers or denied wake locks.
--   Never make scoring depend on wake lock availability.
-
-If wake lock cannot be maintained, scoring still works correctly because
-events use wall-clock timestamps.
-
-------------------------------------------------------------------------
-
-## 17. Navigation Protection
-
-Accidental navigation during scoring should not destroy state.
-
-Because state is persisted continuously, navigation is recoverable.
-
-Additionally:
-
--   Minimize navigation controls on the scoring screen.
--   Warn before intentionally abandoning an active match where
-    appropriate.
--   Use `beforeunload` where useful, but do not rely on it for
-    persistence.
--   Returning to the app should prominently offer to resume the active
-    match.
-
-------------------------------------------------------------------------
-
-## 18. Offline / PWA Requirements
-
-The application should be installable as a PWA.
-
-After initial installation/load, core functionality must work without
-network connectivity.
-
-Cache the application shell using a service worker.
-
-Offline functionality must include:
-
--   Opening the app
--   Viewing tournaments
--   Creating matches
--   Scoring
--   Undo
--   Starting/ending sets
--   Completing matches
--   Viewing history
--   Exporting data
-
-No network request should be required to record a point.
-
-------------------------------------------------------------------------
-
-## 19. Synchronization Marker
-
-Provide an optional `SYNC` action intended for later video
-synchronization.
-
-Pressing it creates:
+Implement deterministic pure domain functions such as:
 
 ``` ts
-action: "SYNC_MARKER"
+calculateSetScore(events)
+calculateMatchState(events)
 ```
 
-with an exact timestamp.
+Tests must cover multiple points, home/away undo, repeated undo, points
+after undo, set boundaries, and completed-set results.
 
-The UI could present:
+------------------------------------------------------------------------
+
+## 6. Team and Match Setup
+
+Creating a match should allow selection of reusable teams and their
+match-specific colors.
 
 ``` text
-Video Sync Marker
+NEW MATCH
+
+Team A
+[ Roots 15 Green ▼ ]
+Color: [ GREEN ]
+Logo:  [ Roots logo ]
+
+Team B
+[ Austin Juniors ▼ ]
+Color: [ BLUE ]
+Logo:  [ Austin Juniors logo ]
+
+[ START MATCH ]
 ```
 
-or place it in a secondary menu so it cannot be confused with scoring.
+If the opponent does not exist, allow `+ Add New Team` with:
 
-A sync marker can be created while performing an obvious visual action
-visible on camera, such as showing the phone or making a deliberate
-gesture.
+-   Team name
+-   Short name
+-   Primary color
+-   Optional secondary color
+-   Optional logo
 
-Multiple sync markers may exist.
-
-The video-processing system can later use one of these timestamps to
-calculate the offset between video time and score-event time.
+Save it for reuse.
 
 ------------------------------------------------------------------------
 
-## 20. Match History
+## 7. Courtside Scoring UI
 
-Opening a completed match should show:
+The live scoring screen must be optimized for portrait phone use and
+one-handed operation.
 
 ``` text
-Vandegrift vs Westlake
+ROOTS vs AUSTIN JUNIORS
+SET 2
 
-Final: 2-1
+┌───────────────────────────┐
+│       [ROOTS LOGO]        │
+│     ROOTS 15 GREEN        │
+│            18             │
+│          + POINT          │
+└───────────────────────────┘
 
-Set 1    25-18
-Set 2    21-25
-Set 3    15-12
+             18 - 16
 
-Started: 2:04 PM
-Ended:   3:17 PM
+┌───────────────────────────┐
+│       [AUSTIN LOGO]       │
+│      AUSTIN JUNIORS       │
+│            16             │
+│          + POINT          │
+└───────────────────────────┘
 
-View Events
-Export CSV
+          [ UNDO ]
+          [ SYNC ]
+        [ END SET ]
 ```
 
-`View Events` can display a chronological log.
+Each team's large scoring button should prominently use that team's
+selected match color. This is specifically intended to make the buttons
+easy to remember while watching the court.
 
-Example:
+Never rely only on color. Also show team name, logo when available, and
+score.
+
+Normal scoring must require exactly one tap and no confirmation.
+
+------------------------------------------------------------------------
+
+## 8. Persistence and Recovery
+
+Suggested IndexedDB stores:
 
 ``` text
-14:04:02.112  Match started
-14:04:08.441  Set 1 started
-14:04:22.819  Vandegrift +1   1-0
-14:04:49.102  Westlake +1     1-1
-...
-```
-
-------------------------------------------------------------------------
-
-## 21. CSV Export
-
-Each match must be exportable as CSV.
-
-Suggested columns:
-
-``` csv
-tournament_id,tournament_name,match_id,set_number,timestamp,epoch_ms,action,home_team,away_team,home_score,away_score,target_event_id
-```
-
-Example:
-
-``` csv
-tournament_01,Grizzly Classic,match_03,1,2026-09-12T19:14:32.183-05:00,1789258472183,HOME_POINT,Vandegrift,Westlake,12,9,
-tournament_01,Grizzly Classic,match_03,1,2026-09-12T19:15:01.442-05:00,1789258501442,AWAY_POINT,Vandegrift,Westlake,12,10,
-```
-
-CSV should contain the complete event history, including undo and sync
-events.
-
-Do not export only the final score sequence.
-
-------------------------------------------------------------------------
-
-## 22. Tournament Export
-
-Provide an `Export Tournament` action.
-
-Preferred V1 options:
-
-### Option A --- JSON
-
-Export one JSON document containing:
-
--   Tournament metadata
--   Matches
--   Sets
--   Complete event history
-
-This is easiest to implement and preserves the complete model.
-
-### Option B --- ZIP
-
-A later enhancement may produce:
-
-``` text
-grizzly-classic/
-  tournament.json
-  vandegrift-manor.csv
-  vandegrift-lake-travis.csv
-  vandegrift-westlake.csv
-```
-
-For V1, JSON tournament export plus individual match CSV export is
-sufficient.
-
-------------------------------------------------------------------------
-
-## 23. Import / Backup
-
-If straightforward, support importing a previously exported tournament
-JSON file.
-
-This provides simple backup/restore without requiring a backend.
-
-Import must:
-
--   Validate file structure
--   Avoid silently overwriting existing tournaments
--   Generate new IDs or ask for confirmation if IDs conflict
-
-This is desirable but may be deferred until after the core scoring
-workflow works.
-
-------------------------------------------------------------------------
-
-## 24. Home Screen
-
-Suggested home screen:
-
-``` text
-VOLLEYBALL SCOREKEEPER
-
-Active
-────────────────────────
-Grizzly Classic
-Vandegrift vs Westlake
-Set 2 — 14-11
-
-[RESUME]
-
-Tournaments
-────────────────────────
-Grizzly Classic        Sep 12
-Westwood Showcase      Sep 19
-AISD Tournament        Sep 26
-
-+ New Tournament
-```
-
-If an active match exists, Resume should be the dominant action.
-
-------------------------------------------------------------------------
-
-## 25. New Match Flow
-
-Within a tournament:
-
-``` text
-New Match
-
-Home Team
-[Vandegrift          ]
-
-Away Team
-[Westlake            ]
-
-[Start Match]
-```
-
-Tournament defaults should reduce repetitive typing.
-
-If `defaultTeamName = Vandegrift`, pre-populate one team field.
-
-The user should still be able to swap home/away.
-
-------------------------------------------------------------------------
-
-## 26. Reliability Principles
-
-The application is being used live. Reliability matters more than visual
-sophistication.
-
-Follow these principles:
-
-### Persist first
-
-When a score button is tapped:
-
-1.  Construct event with timestamp.
-2.  Persist event.
-3.  Update/reconcile UI.
-
-Avoid designs where important state exists only in React memory.
-
-### Events are authoritative
-
-The current score should always be reconstructable from persisted
-events.
-
-### Never depend on connectivity
-
-Scoring must not wait for a network operation.
-
-### Never depend on a running timer
-
-Use timestamps from the system clock.
-
-### Make destructive actions explicit
-
-Deleting tournaments/matches requires confirmation.
-
-Normal scoring does not.
-
-------------------------------------------------------------------------
-
-## 27. Suggested IndexedDB Stores
-
-One possible schema:
-
-``` text
+teams
 tournaments
 matches
 sets
 events
 appState
+syncQueue
 ```
 
-Suggested indexes:
+`appState` should identify the active tournament, match, and set.
+
+Persist every meaningful action immediately.
+
+The app must recover correctly after:
+
+-   Browser refresh
+-   Safari/PWA being killed
+-   Phone lock/sleep
+-   Accidental navigation
+-   Temporary network loss
+
+On reopen:
 
 ``` text
-matches:
-  tournamentId
+RESUME MATCH
 
-sets:
-  matchId
+Roots 15 Green vs Austin Juniors
+Set 2
+18 - 16
 
-events:
-  matchId
-  setId
-  timestamp
-  epochMs
+[ RESUME ]
 ```
 
-`appState` can contain:
+React memory must never be the only copy of scoring state.
 
-``` ts
-interface AppState {
-  activeTournamentId?: string;
-  activeMatchId?: string;
-  activeSetId?: string;
-}
+------------------------------------------------------------------------
+
+## 9. PWA and Wake Lock
+
+The app should be installable as a PWA.
+
+After initial caching/install, all core scoring functionality must work
+offline.
+
+Request Screen Wake Lock while actively scoring where supported.
+Re-request when the page becomes visible again if necessary.
+
+Wake lock is convenience only. Correct scoring/timestamps must not
+depend on it.
+
+------------------------------------------------------------------------
+
+## 10. Set-Level Video Recording
+
+A core workflow assumption is **one movie per set**.
+
+``` text
+Roots vs Austin Juniors
+├── Set 1 → set-1.mov
+├── Set 2 → set-2.mov
+└── Set 3 → set-3.mov
 ```
 
-Use a small IndexedDB wrapper library if helpful, for example Dexie.
-
-Avoid localStorage for the authoritative event store.
-
-------------------------------------------------------------------------
-
-## 28. Event Ordering
-
-Normally events are ordered by `epochMs`.
-
-Because two actions could theoretically receive the same millisecond
-timestamp, each event must also have a unique ID.
-
-Use ordering:
-
-1.  `epochMs`
-2.  Event creation sequence or sortable unique ID
-
-Do not assume timestamps alone are globally unique.
+This makes each recording independently synchronizable and simplifies
+rendering.
 
 ------------------------------------------------------------------------
 
-## 29. Time Changes
+## 11. Video SYNC Workflow
 
-Persist absolute timestamps.
+At the beginning of every set:
 
-The application should not rewrite old timestamps if:
+1.  Start the camera recording.
+2.  Point the camera toward the scoring phone.
+3.  Tap `SYNC`.
+4.  The scorekeeper records an exact `SYNC_MARKER`.
+5.  The phone displays a distinctive visual synchronization sequence.
+6.  Point the camera back at the court.
+7.  Record the set.
 
--   Time zone changes
--   Daylight saving time changes
--   Device locale changes
+The sync screen should include human-readable context:
 
-Store `epochMs` as the authoritative instant.
+``` text
+           SYNC 2
 
-ISO timestamp is retained for readability/export.
+   ROOTS vs AUSTIN JUNIORS
 
-------------------------------------------------------------------------
-
-## 30. Score Reconstruction
-
-Implement score calculation as a pure function where practical.
-
-Conceptually:
-
-``` ts
-calculateScore(events): {
-  homeScore: number;
-  awayScore: number;
-}
+           SET 2
 ```
 
-It should:
+### Machine-detectable flash
 
--   Process events in deterministic order
--   Apply point events
--   Account for undo events
--   Ignore metadata events for scoring
--   Produce current score from event history
+The visual sequence should also be deliberately easy for software to
+detect.
 
-This logic should have strong automated tests.
+Suggested sequence:
+
+``` text
+normal → black → white → black → SYNC information → normal
+```
+
+The exact transition/frame chosen as the synchronization instant must be
+defined consistently.
+
+This provides:
+
+-   Easy manual synchronization by scrubbing to the obvious frame.
+-   Future automatic synchronization by detecting the brightness
+    pattern.
+
+Allow multiple numbered sync markers (`SYNC 1`, `SYNC 2`, etc.) in case
+recording is interrupted.
 
 ------------------------------------------------------------------------
 
-## 31. Testing Requirements
+## 12. Export
 
-At minimum, automated tests should cover:
+### Match CSV
 
-### Score calculation
+Suggested columns:
 
--   Home scores one point
--   Away scores one point
+``` csv
+tournament_id,tournament_name,match_id,set_number,timestamp,epoch_ms,action,home_team,away_team,home_score,away_score,target_event_id,sync_number
+```
+
+Export the complete event history, including undo and sync events.
+
+### Tournament JSON
+
+Export:
+
+-   Tournament metadata
+-   Reusable team data needed by the match
+-   Match appearance/colors
+-   Sets
+-   Events
+-   Sync markers
+-   Logo references/assets as appropriate
+
+Design this format so the future video renderer can consume it directly.
+
+------------------------------------------------------------------------
+
+## 13. Live Score Architecture
+
+Live scoring is separate from video processing.
+
+``` text
+Scorekeeper
+   │
+   ├── IndexedDB (authoritative)
+   │
+   └── async sync queue
+           │
+           ▼
+        Firebase
+           │
+           ▼
+     Public webpage
+```
+
+When a scoring event occurs:
+
+1.  Persist locally.
+2.  Recalculate local state.
+3.  Update local UI.
+4.  Queue cloud synchronization.
+5.  Attempt Firebase update asynchronously.
+
+If offline, continue scoring normally. When connectivity returns,
+Firebase must eventually converge to the authoritative local state.
+
+Use Firebase Hosting and Firebase Realtime Database initially for
+simplicity.
+
+------------------------------------------------------------------------
+
+## 14. Public Live Score Page
+
+No viewer account should be required.
+
+Possible permanent team URL:
+
+``` text
+scores.example.com/roots-15-green
+```
+
+Possible match URL:
+
+``` text
+scores.example.com/roots-15-green/match/abc123
+```
+
+Example:
+
+``` text
+        ROOTS VOLLEYBALL
+
+   [logo]                 [logo]
+
+ROOTS 15 GREEN       AUSTIN JRS
+
+        18  -  16
+
+          SET 2
+
+SETS        1      2
+ROOTS      25     18
+AUSTIN     21     16
+
+          ● LIVE
+
+Grizzly Classic
+Court 7
+```
+
+The page updates automatically without manual refresh.
+
+A later permanent team page can show:
+
+-   Current live match
+-   Earlier matches today
+-   Upcoming entered matches
+
+Eventually add a `Share Live Score` action using the Web Share API where
+supported.
+
+------------------------------------------------------------------------
+
+## 15. Video Renderer
+
+Do not automate iMovie as the core solution.
+
+Create a separate custom renderer, initially as a Node/TypeScript CLI
+using FFmpeg.
+
+Example:
+
+``` bash
+volleyball-video   --video set-2.mov   --match match.json   --set 2   --sync 00:00:14.520   --output set-2-scored.mp4
+```
+
+Inputs:
+
+-   One set video
+-   Match/tournament JSON
+-   Score events
+-   Team logos
+-   Team colors
+-   Sync mapping
+
+Output:
+
+-   MP4 with polished persistent score bug
+
+The resulting video can optionally be edited later in iMovie or Final
+Cut Pro.
+
+------------------------------------------------------------------------
+
+## 16. Video Time Mapping
+
+Example:
+
+``` text
+SYNC app timestamp:  18:42:17.382
+SYNC video position: 00:00:13.500
+
+Point timestamp:     18:43:02.181
+Difference:          +44.799 sec
+
+Point video position:
+00:00:58.299
+```
+
+Once one sync point is known, every event in that recording can be
+mapped to video time.
+
+A later version should automatically scan the beginning of the video for
+the distinctive SYNC flash, show the detected point for confirmation,
+and allow manual correction.
+
+------------------------------------------------------------------------
+
+## 17. Score Bug
+
+Use the term **score bug** for the persistent broadcast-style graphic
+rendered over the video.
+
+Use:
+
+-   **Score bug** - visual graphic on recorded video
+-   **Score overlay renderer** - software that creates/applies it
+-   **Live scoreboard** - separate public realtime webpage
+
+The score bug should look polished and broadcast-like, not like a
+generic iMovie title.
+
+It should contain:
+
+-   Team logos
+-   Team names or short names
+-   Restrained team-color accents
+-   Completed-set scores
+-   Current set score
+-   Clear visual emphasis on the current set
+
+Avoid large bright blocks of team color. Use color as an accent while
+keeping the graphic legible.
+
+------------------------------------------------------------------------
+
+## 18. Stacked Set Scores
+
+The score bug must show previous completed-set scores in addition to the
+current set.
+
+This is important because viewers may scrub/jump directly into the
+middle of a recorded set.
+
+Example during Set 2:
+
+``` text
+┌────────────────────────────────┐
+│ [logo] ROOTS       25 │  18   │
+│ [logo] AUSTIN JRS  21 │  16   │
+│                     S1    S2   │
+└────────────────────────────────┘
+```
+
+This immediately communicates:
+
+-   Roots won Set 1, 25-21.
+-   Current Set 2 score is 18-16.
+
+Example during Set 3:
+
+``` text
+┌────────────────────────────────────┐
+│ [logo] ROOTS       25  21 │  8    │
+│ [logo] AUSTIN JRS  18  25 │  6    │
+│                     S1  S2    S3   │
+└────────────────────────────────────┘
+```
+
+Completed sets should be visually smaller/more muted. The current set
+should be emphasized.
+
+At the beginning of Set 3, show:
+
+``` text
+ROOTS       25  21 | 0
+AUSTIN      18  25 | 0
+             S1  S2  S3
+```
+
+Therefore even a standalone Set 3 video contains the match context.
+
+------------------------------------------------------------------------
+
+## 19. Score Bug Rendering Strategy
+
+Avoid using FFmpeg's primitive text drawing as the main design system.
+
+Preferred architecture:
+
+1.  Domain logic calculates score states and their video intervals.
+2.  A rendering component creates polished transparent score bug assets.
+3.  FFmpeg composites those assets during the correct intervals.
+
+Possible generated assets:
+
+``` text
+score-000.png
+score-001.png
+score-002.png
+...
+```
+
+Each asset can contain logos, typography, colors, completed sets,
+current score, transparency, and visual styling.
+
+This separates score-bug design from video encoding.
+
+------------------------------------------------------------------------
+
+## 20. Future Renderer UI
+
+After the CLI is reliable, create a simple Mac-friendly UI:
+
+``` text
+CREATE SCORED VIDEO
+
+Video
+[ Set-2.mov ]
+
+Match
+Roots 15 Green vs Austin Juniors
+
+Set
+[ 2 ]
+
+Synchronization
+SYNC 2 detected at 00:00:13.500
+
+[ Preview Sync ]
+
+Score Bug Position
+[ Top Left ▼ ]
+
+[ SCORE BUG PREVIEW ]
+
+[ CREATE VIDEO ]
+```
+
+Eventually support dropping all set videos and selecting
+`RENDER ALL SETS`.
+
+------------------------------------------------------------------------
+
+## 21. UX Requirements
+
+Courtside UI must:
+
+-   Work one-handed
+-   Use very large scoring touch targets
+-   Avoid modal dialogs during normal scoring
+-   Keep team names visible
+-   Keep current set visible
+-   Keep Undo accessible
+-   Prevent layout shifts as scores gain digits
+-   Have strong outdoor readability
+-   Support high contrast
+-   Work well in portrait orientation
+-   Remain fully usable without internet
+
+Destructive actions such as deleting teams, matches, or tournaments
+require confirmation.
+
+------------------------------------------------------------------------
+
+## 22. Testing Requirements
+
+### Domain
+
+Test:
+
+-   Home point
+-   Away point
 -   Multiple points
--   Undo home point
--   Undo away point
+-   Undo home/away
 -   Multiple undos
 -   Point after undo
-
-### Sets
-
--   Starting new set resets displayed score
--   Previous set remains unchanged
--   Events belong to correct set
+-   Multiple sets
+-   Correct completed-set results
 
 ### Persistence
 
--   Reload restores active match
--   Reload restores current set and score
--   Completed matches remain available
+Test:
+
+-   Reload during active set
+-   Close/reopen PWA
+-   Correct score/set restored
+-   Historical matches retained
+
+### Offline/live synchronization
+
+Test:
+
+-   Score while offline
+-   Undo while offline
+-   End set while offline
+-   Reconnect
+-   Firebase converges to correct state
 
 ### Export
 
--   CSV contains correct timestamps
--   CSV contains undo events
--   CSV contains sync markers
--   CSV correctly escapes team/tournament names containing commas or
-    quotes
+Test:
 
-### Time
+-   Millisecond timestamps preserved
+-   CSV escaping
+-   Undo retained
+-   Sync markers retained
+-   Team appearance/logo metadata represented
 
--   Millisecond timestamps retained
--   Event ordering deterministic
+### Video timing
 
-------------------------------------------------------------------------
+Test:
 
-## 32. UX Safety Requirements
-
-Because the user is watching a match rather than the phone:
-
--   Important buttons must be usable one-handed.
--   Avoid modal dialogs during normal scoring.
--   Avoid gestures as the only way to perform an action.
--   Do not place destructive controls close to point buttons.
--   Keep text readable outdoors.
--   Support high contrast.
--   Avoid screen layouts that shift when a score changes from one to two
-    digits.
--   Keep team names visible while scoring.
--   Display set number prominently.
--   Make Undo visible at all times during active scoring.
+-   Sync offset calculation
+-   Event-to-video time mapping
+-   Set 2 includes Set 1 final score
+-   Set 3 includes Sets 1 and 2
+-   Undo produces correct score-bug timeline
 
 ------------------------------------------------------------------------
 
-## 33. Accessibility
+## 23. Implementation Phases
 
-At minimum:
+### Phase 1 - Core Domain
 
--   Semantic buttons
--   Accessible labels
--   Sufficient contrast
--   Large touch targets
--   Do not rely exclusively on color to identify teams/actions
--   Support browser text scaling reasonably
+Implement TypeScript models, IndexedDB schema, event processing, score
+reconstruction, and unit tests.
 
-------------------------------------------------------------------------
+### Phase 2 - Courtside Scorekeeper
 
-## 34. Future Video Processing Integration
+Implement reusable teams, logos/colors, tournaments, new matches,
+match-specific colors, scoring, undo, sets, match completion, and reload
+recovery.
 
-Video processing is outside V1, but the scorekeeper data format must
-support it.
+This should be the first genuinely usable tournament version.
 
-Future workflow:
+### Phase 3 - PWA Reliability
 
-``` text
-Video file
-     +
-Match event export
-     +
-Synchronization point
-     ↓
-Video processor
-     ↓
-MP4 with scoreboard overlay
-```
+Implement service worker, offline app shell, installability, wake lock,
+resume handling, and reliability testing.
 
-If:
+### Phase 4 - Video Sync and Export
 
-``` text
-syncEventTimestamp = 19:14:32.183
-```
+Implement SYNC button, machine-visible flash sequence, numbered sync
+markers, event history, CSV export, and tournament JSON.
 
-corresponds to:
+### Phase 5 - Firebase Live Scores
 
-``` text
-videoTime = 00:03:12.500
-```
+Implement Firebase, local sync queue, reconnect handling, public match
+page, realtime updates, and share URL.
 
-then the processor can derive the offset and map every scoring event to
-a video timestamp.
+Never compromise local scoring reliability.
 
-For this reason, do not discard:
+### Phase 6 - Permanent Team Live Page
 
--   Milliseconds
--   Undo events
--   Sync events
--   Set boundaries
--   Original wall-clock timestamps
+Add current live match, earlier results, and upcoming entered matches
+under one bookmarkable team URL.
+
+### Phase 7 - Video Renderer CLI
+
+Read tournament JSON, accept one set video, support manual sync,
+calculate timeline, generate score bug assets, use FFmpeg, output MP4.
+
+### Phase 8 - Renderer Automation
+
+Add automatic SYNC detection, preview/correction, multiple set videos,
+and Render All.
+
+### Phase 9 - Renderer UI
+
+Add a simple Mac-friendly interface around the renderer.
 
 ------------------------------------------------------------------------
 
-## 35. Potential Future Enhancements
+## 24. First Usable Version - Definition of Done
 
-Not part of initial implementation:
+The courtside MVP is complete when:
 
--   Video overlay generator using FFmpeg
--   Automatic matching of videos to matches
--   Cloud backup
--   Shared tournament scoring
--   Live spectator scoreboard
--   Apple Watch scoring
--   Team presets
--   Opponent history
--   Season organization
--   Match notes
--   Serve tracking
--   Score correction/history editor
--   Automatic sync using audio/visual markers
--   Direct video import
--   Automatic scoreboard rendering
--   iCloud/file-system backup
--   Tournament CSV/ZIP bundle
+1.  User creates Roots 15 Green as a reusable team.
+2.  User uploads its logo and selects default colors.
+3.  User creates a tournament.
+4.  User creates/selects an opponent.
+5.  User selects match-specific colors.
+6.  User starts a match and Set 1.
+7.  Scoring buttons clearly reflect each team identity/color.
+8.  User starts the camera and presses SYNC.
+9.  The phone records the sync event and produces the visual
+    flash/screen.
+10. User scores the set.
+11. User makes an error and successfully uses Undo.
+12. Phone locks or app closes.
+13. User reopens and resumes with correct state.
+14. User completes Set 1 and repeats for Set 2.
+15. Previous set scores remain available.
+16. Match history can be reviewed.
+17. Complete timestamped event history can be exported.
+18. All of the above works offline.
 
-Architecture should not unnecessarily prevent these additions, but V1
-should not implement them.
-
-------------------------------------------------------------------------
-
-## 36. Suggested Implementation Phases
-
-### Phase 1 --- Core Domain
-
-Implement:
-
--   Data types
--   IndexedDB schema
--   Event persistence
--   Score reconstruction
--   Unit tests
-
-No elaborate UI required.
-
-### Phase 2 --- Tournament Management
-
-Implement:
-
--   Tournament list
--   Create tournament
--   Tournament detail
--   New match
--   Match list
-
-### Phase 3 --- Live Scoring
-
-Implement:
-
--   Start match
--   Start set
--   Large scoring controls
--   Undo
--   End set
--   Complete match
--   Resume after reload
-
-This phase should be considered the first usable version.
-
-### Phase 4 --- PWA Reliability
-
-Implement:
-
--   Service worker
--   Offline application shell
--   Installability
--   Wake lock
--   Visibility/resume handling
--   Navigation protection
-
-### Phase 5 --- History and Export
-
-Implement:
-
--   Match history
--   Event history
--   CSV export
--   Tournament JSON export
--   Sync markers
-
-### Phase 6 --- Polish
-
-Implement:
-
--   Better responsive layout
--   Haptic feedback where supported
--   Accessibility review
--   Outdoor/high-contrast usability
--   Import/backup if desired
+Firebase and video rendering are subsequent milestones and must not
+block this MVP.
 
 ------------------------------------------------------------------------
 
-## 37. Definition of Done for V1
-
-V1 is complete when this scenario works reliably:
-
-1.  User installs/opens the PWA.
-2.  User creates `Grizzly Classic`.
-3.  User sets `Vandegrift` as the default team.
-4.  User creates a match against `Manor`.
-5.  User starts Set 1.
-6.  User records points throughout the set.
-7.  User accidentally awards the wrong team a point.
-8.  User presses Undo.
-9.  Correct event history is retained.
-10. Phone locks during the match.
-11. User unlocks/reopens the app.
-12. Match resumes with the correct score.
-13. User finishes the match.
-14. User creates several additional matches in the same tournament.
-15. All completed matches remain visible.
-16. User opens any previous match and reviews its set scores.
-17. User exports a match CSV.
-18. CSV contains accurate millisecond timestamps and complete scoring
-    history.
-19. User exports the tournament as JSON.
-20. All of the above works without a network connection after the app
-    has been cached/installed.
-
-------------------------------------------------------------------------
-
-## 38. Codex Implementation Guidance
-
-When implementing this specification:
+## 25. Codex Implementation Guidance
 
 -   Favor simple, explicit code over unnecessary abstraction.
 -   Keep domain/event logic separate from React components.
--   Treat IndexedDB as authoritative persistence.
--   Write score reconstruction as testable pure logic.
--   Add tests as domain behavior is implemented.
--   Do not introduce a backend.
--   Do not introduce authentication.
--   Do not expand scope into player statistics or volleyball rule
-    enforcement.
--   Ensure the application can recover correctly after reload before
-    spending significant effort on styling.
--   Implement incrementally so each phase leaves the application
-    runnable.
+-   Keep Firebase code separate from core scoring logic.
+-   Keep video rendering outside the PWA.
+-   Persist first, synchronize second.
+-   Treat IndexedDB/events as authoritative.
+-   Never require network access for scoring.
+-   Preserve timestamps at millisecond precision.
+-   Make reconstruction deterministic and heavily tested.
+-   Do not add authentication to the courtside MVP.
+-   Do not expand into player stats, rotations, lineups, or volleyball
+    rule enforcement yet.
+-   Keep each implementation phase runnable.
+-   Prove persistence/recovery before spending substantial effort on
+    polish.
 
-If a requirement is ambiguous, favor reliability and simplicity for a
-parent operating a phone while watching a live volleyball match.
+------------------------------------------------------------------------
+
+## 26. Future Ideas - Out of Initial Scope
+
+Possible later additions:
+
+-   Season organization
+-   Schedules
+-   Player rosters/stats
+-   Serve tracking
+-   Rotations/lineups
+-   Highlight markers
+-   Automatic highlight clips
+-   Cloud backup
+-   Multi-device scoring
+-   Apple Watch scoring
+-   Live video streaming
+-   QR codes for live scoreboard
+-   Score bug themes
+-   Automatic opponent/logo lookup
+-   Automatic video association
+-   Direct Final Cut workflows
+-   Social-video generation
+
+Do not implement these until the core workflow is stable.
+
+------------------------------------------------------------------------
+
+## 27. Product Summary
+
+The central product principle is:
+
+> **One courtside tap creates the authoritative score event used
+> everywhere else.**
+
+When the operator taps `ROOTS +1`, that action:
+
+1.  Immediately updates and persists the local match.
+2.  Optionally synchronizes the public live scoreboard.
+3.  Creates the timestamped event later used by the video renderer.
+
+The operator should never separately maintain a live score or manually
+reconstruct the scoring timeline during video editing.
