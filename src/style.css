@@ -988,3 +988,19 @@ dialog.sync-white {
 .score-button {
   position: relative;
 }
+
+.app-updates {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.app-updates p,
+.app-updates small {
+  flex-basis: 100%;
+  margin: 0;
+}
+.app-updates > button {
+  font-size: 0.8rem;
+}

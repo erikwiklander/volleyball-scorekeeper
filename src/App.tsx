@@ -1,3 +1,9 @@
+import {
+  applyUpdate,
+  checkForUpdates,
+  getUpdateState,
+  subscribeUpdates,
+} from './updates';
 import { MatchSetup, TeamLibrary } from './Teams';
 import { saveAppearance, type TeamDraft } from './domain';
 import {
@@ -5,6 +11,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
@@ -64,6 +71,7 @@ const timeLabel = (value: string) =>
   });
 
 export default function App() {
+  const updates = useSyncExternalStore(subscribeUpdates, getUpdateState);
   const [data, setData] = useState<Snapshot>(emptySnapshot);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -552,7 +560,7 @@ export default function App() {
             : 'Opening your courtside notebook…'}
         </p>
       ) : (
-        <main>
+        <main inert={updates.applying}>
           {page.kind === 'home' && (
             <>
               <div className="intro">
@@ -1050,6 +1058,41 @@ export default function App() {
           )}
         </main>
       )}
+      <section className="app-updates" aria-label="App updates">
+        {updates.message && <p role="status">{updates.message}</p>}
+        {updates.available && (
+          <>
+            <button
+              className="primary"
+              disabled={
+                !ready ||
+                scoring ||
+                busy ||
+                logoLoading ||
+                !!modal ||
+                !!syncFlash ||
+                updates.applying
+              }
+              onClick={() => {
+                if (!saving.current && !scoring) void applyUpdate();
+              }}
+            >
+              Update & reload
+            </button>
+            {scoring && (
+              <small>
+                Use “Save & leave scoring” before loading the update.
+              </small>
+            )}
+          </>
+        )}
+        <button
+          disabled={updates.checking || updates.applying}
+          onClick={() => void checkForUpdates()}
+        >
+          {updates.checking ? 'Checking…' : 'Check for updates'}
+        </button>
+      </section>
       <footer>
         <span>VOLLEYBALL SCOREKEEPER</span>
         <span className="build-version" title={`Built ${__BUILD_TIME__}`}>

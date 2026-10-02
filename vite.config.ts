@@ -31,6 +31,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
+      injectRegister: false,
       includeAssets: ['icon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Volleyball Scorekeeper',
@@ -52,6 +53,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: false,
+        clientsClaim: false,
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
         navigateFallback: 'index.html',
       },

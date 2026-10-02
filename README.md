@@ -1,6 +1,6 @@
 # Volleyball Scorekeeper
 
-A phone-first, offline volleyball scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. No backend, account, external fonts, or network calls during scoring.
+A phone-first, offline volleyball scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. No backend, account, or external fonts. Scoring never depends on network access.
 
 ## Run locally
 
@@ -63,7 +63,7 @@ IndexedDB uses six stores: teams, tournaments, matches, sets, events, appState. 
 
 The app requests persistent browser storage and a screen wake lock when supported. Browser storage can still be cleared or evicted; no browser app can guarantee data survives clearing site data, private sessions, uninstall behavior, or device loss. Export backups regularly. Storage is specific to the browser/profile/origin. Changing the site domain or GitHub repository path can affect access; export before moving the site.
 
-Service-worker updates wait until existing app clients close, avoiding an automatic reload during scoring. No external runtime resources are needed offline.
+Service-worker updates are checked on launch, on returning to the app or reconnecting (at most once per minute), and with **Check for updates**. A downloaded version shows **Update & reload**, disabled while scoring, saving, or editing a match. Only the tab choosing that action reloads; other scoring tabs continue. Neither updates nor update checks clear IndexedDB. No external runtime resources are needed offline.
 
 ## Export contract (version 2; version 1 import supported)
 
@@ -89,7 +89,7 @@ Use **Your teams** to create or edit reusable teams. Logos accept PNG, JPEG, or 
 
 The IndexedDB version 2 migration adds the teams store without rewriting old matches or event history. Legacy matches keep their original names and colors. JSON imports create new IDs, including team references, and never overwrite current teams.
 
-The footer shows the app version and seven-character build commit. Local modified builds have a `-local` suffix; the build timestamp appears in the label’s tooltip. Installed offline copies show their own cached build identity. Close all app windows and reopen online to activate a waiting service-worker update.
+The footer shows the app version and seven-character build commit. Local modified builds have a `-local` suffix; the build timestamp appears in the label’s tooltip. Installed offline copies show their own cached build identity. Use **Check for updates**, then **Update & reload** after leaving scoring. Older installs that predate these controls need all Scorekeeper tabs and installed app windows closed once so the downloaded worker can activate.
 
 ### Standalone games
 
