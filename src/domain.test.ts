@@ -406,6 +406,10 @@ describe('reusable teams and version 2 backups', () => {
       },
     });
     point('HOME_POINT');
+    // Force key order to differ from event sequence; IndexedDB reads by key.
+    data.events.forEach((event, index) => {
+      event.id = `legacy-${data.events.length - index}`;
+    });
     for (const store of ['tournaments', 'matches', 'sets', 'events'] as const) {
       for (const item of data[store]) await legacy.put(store, item);
     }
@@ -413,7 +417,10 @@ describe('reusable teams and version 2 backups', () => {
     legacy.close();
     const upgraded = await openDatabase(name);
     const restored = await readSnapshot(upgraded);
-    expect(restored).toEqual(data);
+    expect({ ...restored, events: orderedEvents(restored.events) }).toEqual({
+      ...data,
+      events: orderedEvents(data.events),
+    });
     await mutate(upgraded, (d) => {
       saveAppearance(
         d,
