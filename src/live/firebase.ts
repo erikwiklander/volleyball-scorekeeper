@@ -33,6 +33,9 @@ function publishingAuth() {
   if (!publisherAuth) {
     publisherAuth = initializeAuth(app, {
       persistence: indexedDBLocalPersistence,
+      // Firebase preloads the sign-in iframe on Safari/mobile before the tap.
+      // Without this, cold popup setup can outlive the browser's user gesture.
+      popupRedirectResolver: browserPopupRedirectResolver,
     });
     if (emulator)
       connectAuthEmulator(publisherAuth, 'http://127.0.0.1:9099', {

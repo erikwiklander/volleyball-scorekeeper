@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { User } from 'firebase/auth';
 import type { Broadcast } from './model';
 import { liveConfig, liveUrl } from './config';
@@ -17,6 +17,8 @@ export default function LiveControls({
   onStop: () => void;
 }) {
   const [connecting, setConnecting] = useState(false);
+  const attempt = useRef(0);
+  const [preparingSlow, setPreparingSlow] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const status = useSyncExternalStore(subscribeLiveStatus, getLiveStatus);
@@ -46,6 +48,19 @@ export default function LiveControls({
       unsubscribe?.();
     };
   }, [configured]);
+  useEffect(() => {
+    if (!configured || user !== undefined) {
+      setPreparingSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setPreparingSlow(true), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [configured, user]);
+  useEffect(() => {
+    return () => {
+      attempt.current++;
+    };
+  }, []);
   const signedIn =
     !!user &&
     !user.isAnonymous &&
@@ -90,11 +105,21 @@ export default function LiveControls({
                 disabled={!api || user === undefined || connecting || !online}
                 onClick={async () => {
                   if (!api) return;
+                  const currentAttempt = ++attempt.current;
+                  const timer = window.setTimeout(() => {
+                    if (attempt.current !== currentAttempt) return;
+                    setConnecting(false);
+                    setError(
+                      'Google sign-in is taking longer than expected. Finish in the sign-in window, or try again if no window opened. Your scores are saved on this device.',
+                    );
+                  }, 30_000);
                   setConnecting(true);
                   setError('');
                   try {
                     await api.signInPublisher();
+                    if (attempt.current === currentAttempt) setError('');
                   } catch (error) {
+                    if (attempt.current !== currentAttempt) return;
                     const code = (error as { code?: string }).code;
                     if (
                       code !== 'auth/popup-closed-by-user' &&
@@ -106,12 +131,28 @@ export default function LiveControls({
                           : 'Google sign-in could not finish. Please try again. Local scoring still works.',
                       );
                   } finally {
-                    setConnecting(false);
+                    window.clearTimeout(timer);
+                    if (attempt.current === currentAttempt)
+                      setConnecting(false);
                   }
                 }}
               >
-                {connecting ? 'Signing in…' : 'Sign in with Google'}
+                {connecting
+                  ? 'Signing in…'
+                  : user === undefined
+                    ? 'Preparing Google sign-in…'
+                    : 'Sign in with Google'}
               </button>
+              {preparingSlow && (
+                <p role="alert">
+                  Google sign-in could not finish loading. Check your
+                  connection, then{' '}
+                  <button disabled={busy} onClick={() => location.reload()}>
+                    Reload sign-in
+                  </button>
+                  . Your scores stay saved on this device.
+                </p>
+              )}
             </>
           )}
           {signedIn && broadcast && !ownsLink && (

@@ -14,6 +14,10 @@ test('public viewer follows points, offline recovery, final results, stop and de
   await expect(
     page.getByRole('button', { name: 'Start live sharing' }),
   ).toBeDisabled();
+  // Mobile browsers must prepare Firebase's popup helper before the tap.
+  await expect(
+    page.locator('iframe[src*="/emulator/auth/iframe"]'),
+  ).toHaveCount(1);
   const popupPromise = page.waitForEvent('popup');
   await page
     .getByRole('button', { name: 'Sign in with Google', exact: true })
@@ -142,4 +146,46 @@ test('public viewer follows points, offline recovery, final results, stop and de
   } finally {
     await viewerContext.close();
   }
+});
+
+test('a stalled Google window offers a retry while local scoring stays usable', async ({
+  page,
+  context,
+}) => {
+  await context.route('**/emulator/auth/handler?**', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<h1>Sign-in service delayed</h1>',
+    }),
+  );
+  await page.goto('./');
+  await page.getByRole('button', { name: '+ New game', exact: true }).click();
+  await page.getByLabel('Home team', { exact: true }).fill('Local home');
+  await page.getByLabel('Away team', { exact: true }).fill('Local away');
+  await page.getByRole('button', { name: 'Create game', exact: true }).click();
+  await page.getByRole('button', { name: 'Start Set 1' }).click();
+  const login = page.getByRole('button', {
+    name: 'Sign in with Google',
+    exact: true,
+  });
+  await expect(login).toBeEnabled();
+  await page.clock.install();
+  const popupPromise = page.waitForEvent('popup');
+  await login.click();
+  const popup = await popupPromise;
+  await expect(
+    popup.getByRole('heading', { name: 'Sign-in service delayed' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Signing in…', exact: true }),
+  ).toBeDisabled();
+  await page.clock.fastForward(30_001);
+  await expect(login).toBeEnabled();
+  await expect(page.getByRole('alert')).toContainText(
+    'Google sign-in is taking longer than expected',
+  );
+  const home = page.getByRole('button', { name: 'Add point for Local home' });
+  await home.click();
+  await expect(home.locator('.score')).toHaveText('1');
+  await popup.close();
 });
