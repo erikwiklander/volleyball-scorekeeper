@@ -51,7 +51,7 @@ Repository: [erikwiklander/volleyball-scorekeeper](https://github.com/erikwiklan
 
 For tournaments, expand **Tournaments (optional)** on the home screen. Existing tournament records and exports remain available.
 
-Completed sets/matches are read-only. Ties and unusual scores are accepted. Set win totals are simple comparisons, not rule enforcement. New matches are initially `not_started`; MATCH_STARTED is recorded when the first set begins. Multiple unfinished matches are allowed; the most recently selected appears first in Resume.
+Completed sets/matches are read-only for scoring. To remove a test or unwanted match, open it, expand **Match management**, choose **Delete match**, and confirm **Delete permanently**. This works for standalone games and tournament matches in any status. Deletion removes the match, its sets, and all its events together; saved teams, the tournament, and other matches remain. Ties and unusual scores are accepted. Set win totals are simple comparisons, not rule enforcement. New matches are initially `not_started`; MATCH_STARTED is recorded when the first set begins. Multiple unfinished matches are allowed; the most recently selected appears first in Resume.
 
 On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android, use the browser’s install action. Real-device installation, screen lock/relaunch, and wake-lock behavior should be smoke-tested on the target phones before tournament use.
 
@@ -59,7 +59,7 @@ On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android,
 
 Every action captures `Date.now()` at the handler before writing. ISO timestamps are UTC with milliseconds; `epochMs` is the authoritative instant. Device time must be set accurately. Event ordering for display/export is epoch milliseconds, then creation sequence, then ID. Undo targets use creation sequence so clock rollback cannot undo the wrong point.
 
-IndexedDB uses six stores: teams, tournaments, matches, sets, events, appState. Mutations read and write within a single strict-durability transaction; React updates only after commit. Concurrent tabs serialize writes and receive refresh notifications. Buttons are briefly disabled during a write. A failed save is visibly reported; it is never displayed as a successful point. Events use insert-only writes, except explicit tournament deletion. Scores are reconstructed from point and undo events. No running timer is required.
+IndexedDB uses six stores: teams, tournaments, matches, sets, events, appState. Mutations read and write within a single strict-durability transaction; React updates only after commit. Concurrent tabs serialize writes and receive refresh notifications. Buttons are briefly disabled during a write. A failed save is visibly reported; it is never displayed as a successful point. Events use insert-only writes, except explicit match or tournament deletion. Scores are reconstructed from point and undo events. No running timer is required.
 
 The app requests persistent browser storage and a screen wake lock when supported. Browser storage can still be cleared or evicted; no browser app can guarantee data survives clearing site data, private sessions, uninstall behavior, or device loss. Export backups regularly. Storage is specific to the browser/profile/origin. Changing the site domain or GitHub repository path can affect access; export before moving the site.
 

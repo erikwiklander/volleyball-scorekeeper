@@ -423,3 +423,144 @@ test('saved teams, offline logos and match overrides survive edits, reload and b
   await expect(home.locator('img')).toBeVisible();
   await expect(home.locator('.score')).toHaveText('1');
 });
+
+for (const tournamentMatch of [false, true]) {
+  test(`confirm deletion of ${tournamentMatch ? 'a completed tournament match' : 'an active standalone game'} while keeping other records`, async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    await page.goto('./');
+    await expect(
+      page.getByText('Offline ready', { exact: true }),
+    ).toBeVisible();
+    if (tournamentMatch) {
+      await page.getByText('Tournaments (optional)', { exact: false }).click();
+      await page.getByRole('button', { name: '+ New tournament' }).click();
+      await page.getByLabel('Tournament name').fill('Keep this tournament');
+      await page.getByRole('button', { name: 'Save tournament' }).click();
+    }
+    async function newMatch(home: string, away: string) {
+      await page
+        .getByRole('button', {
+          name: tournamentMatch ? '+ New match' : '+ New game',
+          exact: true,
+        })
+        .click();
+      await page.getByLabel('Home team', { exact: true }).fill(home);
+      await page.getByLabel('Away team', { exact: true }).fill(away);
+      await page
+        .getByRole('button', {
+          name: tournamentMatch ? 'Create match' : 'Create game',
+          exact: true,
+        })
+        .click();
+    }
+    await newMatch('Keeper', 'Other');
+    await page
+      .getByRole('button', {
+        name: tournamentMatch ? '← Keep this tournament' : 'All games',
+      })
+      .click();
+    await newMatch('Delete me', 'Opponent');
+    await page.getByRole('button', { name: 'Start Set 1' }).click();
+    const scoreButton = page.getByRole('button', {
+      name: 'Add point for Delete me',
+    });
+    await scoreButton.click();
+    await expect(scoreButton.locator('.score')).toHaveText('1');
+    if (tournamentMatch) {
+      await page.getByRole('button', { name: 'End set', exact: true }).click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'End set', exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: 'Complete match', exact: true })
+        .click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Complete match', exact: true })
+        .click();
+      await expect(
+        page.getByText('MATCH COMPLETE', { exact: true }),
+      ).toBeVisible();
+    }
+    const second = !tournamentMatch ? await context.newPage() : undefined;
+    if (second) {
+      await second.goto('./');
+      await second.getByRole('button', { name: 'Resume match' }).click();
+      await second
+        .getByRole('button', { name: 'End set', exact: true })
+        .click();
+    }
+    await context.setOffline(true);
+    await page.getByText('Match management', { exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Delete match', exact: true })
+      .click();
+    await expect(page.getByRole('dialog')).toContainText(
+      'Delete me vs Opponent',
+    );
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Cancel', exact: true })
+      .click();
+    await expect(
+      page.getByRole('heading', { name: 'Delete me vs Opponent', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Delete match', exact: true })
+      .click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Delete permanently' })
+      .click();
+    await expect(
+      page.getByRole('button', { name: /Keeper vs Other/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /Delete me vs Opponent/ }),
+    ).toHaveCount(0);
+    if (second) {
+      await expect(second.getByRole('dialog')).toContainText(
+        'This match has been deleted',
+      );
+      await second
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .click();
+      await expect(
+        second.getByText('This record is no longer available.'),
+      ).toBeVisible();
+      await second.close();
+    }
+    if (tournamentMatch) {
+      const download = page.waitForEvent('download');
+      await page
+        .getByRole('button', { name: 'Export tournament JSON' })
+        .click();
+      const backup = JSON.parse(
+        await readFile((await (await download).path())!, 'utf8'),
+      );
+      expect(
+        backup.matches.map((m: { homeTeam: string }) => m.homeTeam),
+      ).toEqual(['Keeper']);
+      expect(backup.sets).toEqual([]);
+      expect(backup.events).toEqual([]);
+      await page.getByRole('button', { name: 'All tournaments' }).click();
+    }
+    if (browserName === 'webkit') await context.setOffline(false);
+    await page.reload();
+    await expect(
+      page.getByRole('heading', { name: 'Your teams 4', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /Delete me vs Opponent/ }),
+    ).toHaveCount(0);
+    await page.getByRole('button', { name: 'Resume match' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Keeper vs Other', exact: true }),
+    ).toBeVisible();
+  });
+}

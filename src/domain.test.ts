@@ -4,6 +4,7 @@ import {
   activePoints,
   calculateScore,
   completeMatch,
+  deleteMatch,
   emptySnapshot,
   endSet,
   orderedEvents,
@@ -430,5 +431,107 @@ describe('reusable teams and version 2 backups', () => {
     });
     expect((await readSnapshot(upgraded)).teams).toHaveLength(1);
     upgraded.close();
+  });
+});
+
+describe('match deletion', () => {
+  it.each([
+    [false, 'not_started'],
+    [false, 'in_progress'],
+    [false, 'completed'],
+    [true, 'not_started'],
+    [true, 'in_progress'],
+    [true, 'completed'],
+  ] as const)(
+    'deletes only the selected match (standalone=%s, status=%s)',
+    async (standalone, status) => {
+      const draft = fixture();
+      if (standalone) delete draft.matches[0].tournamentId;
+      saveAppearance(
+        draft,
+        { name: 'Saved team', primaryColor: '#008000' },
+        new Date(at).toISOString(),
+      );
+      draft.matches.push({ ...draft.matches[0], id: 'keep' });
+      startSet(draft, 'keep', at);
+      const keepSet = draft.sets[0].id;
+      scoreAction(draft, 'keep', keepSet, 'AWAY_POINT', at);
+      if (status !== 'not_started') {
+        startSet(draft, 'm', at);
+        const targetSet = draft.sets.at(-1)!.id;
+        scoreAction(draft, 'm', targetSet, 'HOME_POINT', at);
+        scoreAction(draft, 'm', targetSet, 'UNDO', at);
+        syncMarker(draft, 'm', at);
+        if (status === 'completed') {
+          endSet(draft, 'm', targetSet, at);
+          completeMatch(draft, 'm', at);
+        }
+      }
+      draft.appState = {
+        id: 'current',
+        activeTournamentId: standalone ? undefined : 't',
+        activeMatchId: status === 'completed' ? 'keep' : 'm',
+        activeSetId:
+          status === 'completed'
+            ? keepSet
+            : draft.sets.find((s) => s.matchId === 'm')?.id,
+      };
+      const before = structuredClone(draft);
+      const name = crypto.randomUUID();
+      let db = await openDatabase(name);
+      await mutate(db, (d) => Object.assign(d, draft));
+      await mutate(db, (d) => deleteMatch(d, 'm'));
+      db.close();
+      db = await openDatabase(name);
+      const restored = await readSnapshot(db);
+      expect(restored.matches).toEqual(
+        before.matches.filter((m) => m.id !== 'm'),
+      );
+      expect(restored.sets).toEqual(
+        before.sets.filter((s) => s.matchId !== 'm'),
+      );
+      expect(orderedEvents(restored.events)).toEqual(
+        orderedEvents(before.events.filter((e) => e.matchId !== 'm')),
+      );
+      expect(restored.teams).toEqual(before.teams);
+      expect(restored.tournaments).toEqual(before.tournaments);
+      expect(restored.appState).toEqual(
+        status === 'completed'
+          ? before.appState
+          : {
+              id: 'current',
+              activeTournamentId: before.appState.activeTournamentId,
+            },
+      );
+      expect(setScore(restored, keepSet)).toEqual({
+        homeScore: 0,
+        awayScore: 1,
+      });
+      expect(() => deleteMatch(restored, 'm')).toThrow('no longer exists');
+      db.close();
+    },
+  );
+  it('rolls back a failed deletion and rejects scoring after a committed deletion', async () => {
+    point('HOME_POINT');
+    const name = crypto.randomUUID();
+    const db = await openDatabase(name);
+    const other = await openDatabase(name);
+    await mutate(db, (d) => Object.assign(d, data));
+    await expect(
+      mutate(db, (d) => {
+        deleteMatch(d, 'm');
+        throw new Error('Write failed');
+      }),
+    ).rejects.toThrow();
+    expect(setScore(await readSnapshot(db), data.sets[0].id).homeScore).toBe(1);
+    await mutate(db, (d) => deleteMatch(d, 'm'));
+    await expect(
+      mutate(other, (d) =>
+        scoreAction(d, 'm', data.sets[0].id, 'HOME_POINT', at),
+      ),
+    ).rejects.toThrow();
+    expect((await readSnapshot(other)).events).toEqual([]);
+    other.close();
+    db.close();
   });
 });

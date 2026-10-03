@@ -334,3 +334,19 @@ export function saveAppearance(
     logo: draft.logo,
   };
 }
+
+// Explicitly deleting a match removes its complete local record in one mutation.
+// Ordinary score corrections still append UNDO events and retain history.
+export function deleteMatch(data: Snapshot, matchId: string) {
+  if (!data.matches.some((match) => match.id === matchId))
+    throw new Error('This match no longer exists.');
+  data.matches = data.matches.filter((match) => match.id !== matchId);
+  data.sets = data.sets.filter((set) => set.matchId !== matchId);
+  data.events = data.events.filter((event) => event.matchId !== matchId);
+  if (data.appState.activeMatchId === matchId) {
+    data.appState = {
+      id: 'current',
+      activeTournamentId: data.appState.activeTournamentId,
+    };
+  }
+}

@@ -20,6 +20,7 @@ import type { IDBPDatabase } from 'idb';
 import {
   activePoints,
   completeMatch,
+  deleteMatch,
   emptySnapshot,
   endSet,
   id,
@@ -30,6 +31,7 @@ import {
   startSet,
   syncMarker,
   type Snapshot,
+  type Match,
   type Tournament,
 } from './domain';
 import { mutate, openDatabase, readSnapshot } from './db';
@@ -50,6 +52,7 @@ type Modal =
   | { kind: 'newMatch'; tournamentId?: string }
   | { kind: 'endSet'; matchId: string; setId: string }
   | { kind: 'complete'; matchId: string }
+  | { kind: 'deleteMatch'; match: Match }
   | { kind: 'delete'; tournament: Tournament };
 const dateLabel = (value?: string) =>
   value
@@ -450,6 +453,20 @@ export default function App() {
           setModal(undefined);
           navigate({ kind: 'match', id: matchId });
           void navigator.storage?.persist?.();
+        },
+      );
+    }
+    if (modal?.kind === 'deleteMatch') {
+      const { id: matchId, tournamentId } = modal.match;
+      void commit(
+        (d) => deleteMatch(d, matchId),
+        () => {
+          setModal(undefined);
+          navigate(
+            tournamentId && data.tournaments.some((t) => t.id === tournamentId)
+              ? { kind: 'tournament', id: tournamentId }
+              : { kind: 'home' },
+          );
         },
       );
     }
@@ -1043,13 +1060,29 @@ export default function App() {
                   </ol>
                 </section>
               )}
+              <details className="danger-zone">
+                <summary>Match management</summary>
+                <p>
+                  Delete this match and its scoring history from this device.
+                </p>
+                <button
+                  className="danger"
+                  disabled={busy || !!syncFlash}
+                  onClick={() => {
+                    setError('');
+                    setModal({ kind: 'deleteMatch', match });
+                  }}
+                >
+                  Delete match
+                </button>
+              </details>
             </>
           )}
           {page.kind !== 'home' && !(match || tournament) && (
             <div className="empty">
               <h2>This record is no longer available.</h2>
               <button onClick={() => navigate({ kind: 'home' })}>
-                Back to tournaments
+                Back to home
               </button>
             </div>
           )}
@@ -1152,7 +1185,9 @@ export default function App() {
                       ? `End Set ${data.sets.find((s) => s.id === modal.setId)?.setNumber}?`
                       : modal.kind === 'complete'
                         ? 'Complete this match?'
-                        : 'Delete tournament?'}
+                        : modal.kind === 'deleteMatch'
+                          ? 'Delete this match?'
+                          : 'Delete tournament?'}
               </h2>
             </div>
             {error && (
@@ -1243,6 +1278,7 @@ export default function App() {
             {modal.kind === 'endSet' &&
               (() => {
                 const m = data.matches.find((m) => m.id === modal.matchId)!;
+                if (!m) return <p>This match has been deleted.</p>;
                 const s = setScore(data, modal.setId);
                 return (
                   <div className="confirm-scores">
@@ -1263,6 +1299,32 @@ export default function App() {
                 All set scores and events will be saved. Completed matches are
                 read-only.
               </p>
+            )}
+            {modal.kind === 'deleteMatch' && (
+              <>
+                <p>
+                  <strong>
+                    {modal.match.homeTeam} vs {modal.match.awayTeam}
+                  </strong>
+                </p>
+                <p>
+                  {dateLabel(modal.match.createdAt)} ·{' '}
+                  {modal.match.status === 'completed'
+                    ? 'Completed'
+                    : modal.match.status === 'in_progress'
+                      ? 'In progress'
+                      : 'Not started'}
+                </p>
+                <p>
+                  This permanently deletes the match, all its sets, points, undo
+                  history, and sync markers. This cannot be undone.
+                </p>
+                <p>
+                  Saved teams
+                  {modal.match.tournamentId ? ', the tournament,' : ''} and
+                  other matches will be kept.
+                </p>
+              </>
             )}
             {modal.kind === 'delete' && (
               <>
@@ -1293,6 +1355,7 @@ export default function App() {
               <button
                 type="button"
                 disabled={busy || logoLoading}
+                autoFocus={modal.kind === 'deleteMatch'}
                 onClick={() => {
                   setModal(undefined);
                   setError('');
@@ -1322,11 +1385,15 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={busy || logoLoading}
-                  className={modal.kind === 'delete' ? 'danger' : 'primary'}
+                  className={
+                    modal.kind === 'delete' || modal.kind === 'deleteMatch'
+                      ? 'danger'
+                      : 'primary'
+                  }
                 >
                   {busy
                     ? 'Saving…'
-                    : modal.kind === 'delete'
+                    : modal.kind === 'delete' || modal.kind === 'deleteMatch'
                       ? 'Delete permanently'
                       : modal.kind === 'newMatch'
                         ? modal.tournamentId
