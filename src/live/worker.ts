@@ -60,6 +60,7 @@ export function startLiveWorker(db: IDBPDatabase) {
     if (document.visibilityState === 'visible') void wake();
   };
   window.addEventListener('online', wake);
+  window.addEventListener('live-auth-change', wake);
   document.addEventListener('visibilitychange', visible);
   if (channel) channel.onmessage = wake;
   void wake();
@@ -69,6 +70,7 @@ export function startLiveWorker(db: IDBPDatabase) {
       stopped = true;
       window.clearInterval(timer);
       window.removeEventListener('online', wake);
+      window.removeEventListener('live-auth-change', wake);
       document.removeEventListener('visibilitychange', visible);
       channel?.close();
     },

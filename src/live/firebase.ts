@@ -3,7 +3,12 @@ import {
   connectAuthEmulator,
   initializeAuth,
   indexedDBLocalPersistence,
-  signInAnonymously,
+  GoogleAuthProvider,
+  signInWithPopup,
+  browserPopupRedirectResolver,
+  onAuthStateChanged,
+  signOut,
+  type User,
 } from 'firebase/auth';
 import {
   connectDatabaseEmulator,
@@ -24,28 +29,48 @@ const emulator =
   ['localhost', '127.0.0.1'].includes(location.hostname);
 if (emulator) connectDatabaseEmulator(database, '127.0.0.1', 9000);
 let publisherAuth: ReturnType<typeof initializeAuth> | undefined;
-let identity: Promise<string> | undefined;
-export async function publisherIdentity() {
-  if (!identity)
-    identity = (async () => {
-      if (!publisherAuth) {
-        // Anonymous publishing needs persistent identity, but no popup/redirect iframe.
-        publisherAuth = initializeAuth(app, {
-          persistence: indexedDBLocalPersistence,
-        });
-        if (emulator)
-          connectAuthEmulator(publisherAuth, 'http://127.0.0.1:9099', {
-            disableWarnings: true,
-          });
-      }
-      const auth = publisherAuth;
-      await auth.authStateReady();
-      return auth.currentUser?.uid ?? (await signInAnonymously(auth)).user.uid;
-    })().catch((error) => {
-      identity = undefined;
-      throw error;
+function publishingAuth() {
+  if (!publisherAuth) {
+    publisherAuth = initializeAuth(app, {
+      persistence: indexedDBLocalPersistence,
     });
-  return identity;
+    if (emulator)
+      connectAuthEmulator(publisherAuth, 'http://127.0.0.1:9099', {
+        disableWarnings: true,
+      });
+    onAuthStateChanged(publisherAuth, () =>
+      window.dispatchEvent(new Event('live-auth-change')),
+    );
+  }
+  return publisherAuth;
+}
+export function watchPublisher(callback: (user: User | null) => void) {
+  return onAuthStateChanged(publishingAuth(), callback);
+}
+// Called directly from a click; no awaited import before opening the popup.
+export function signInPublisher() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  return signInWithPopup(
+    publishingAuth(),
+    provider,
+    browserPopupRedirectResolver,
+  );
+}
+export function signOutPublisher() {
+  return signOut(publishingAuth());
+}
+export async function publisherIdentity() {
+  const auth = publishingAuth();
+  await auth.authStateReady();
+  const user = auth.currentUser;
+  if (
+    !user ||
+    user.isAnonymous ||
+    !user.providerData.some((p) => p.providerId === 'google.com')
+  )
+    throw new Error('Sign in with Google to publish pending scores.');
+  return user.uid;
 }
 export async function publish(entry: SyncEntry) {
   if ((await publisherIdentity()) !== entry.ownerUid)

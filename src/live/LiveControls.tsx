@@ -1,4 +1,5 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import type { User } from 'firebase/auth';
 import type { Broadcast } from './model';
 import { liveConfig, liveUrl } from './config';
 import { getLiveStatus, subscribeLiveStatus } from './worker';
@@ -20,6 +21,37 @@ export default function LiveControls({
   const [copied, setCopied] = useState(false);
   const status = useSyncExternalStore(subscribeLiveStatus, getLiveStatus);
   const configured = !!liveConfig();
+  const [api, setApi] = useState<typeof import('./firebase')>();
+  const [user, setUser] = useState<User | null>();
+  useEffect(() => {
+    if (!configured) return;
+    let alive = true;
+    let unsubscribe: (() => void) | undefined;
+    void import('./firebase')
+      .then((module) => {
+        if (!alive) return;
+        setApi(module);
+        unsubscribe = module.watchPublisher((value) => {
+          if (alive) setUser(value);
+        });
+      })
+      .catch(() => {
+        if (alive)
+          setError(
+            'Sign-in could not load. Reconnect and reopen this match. Local scoring still works.',
+          );
+      });
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, [configured]);
+  const signedIn =
+    !!user &&
+    !user.isAnonymous &&
+    user.providerData.some((p) => p.providerId === 'google.com');
+  const ownsLink = signedIn && (!broadcast || user.uid === broadcast.ownerUid);
+
   const pending = !!broadcast && broadcast.revision > broadcast.syncedRevision;
   const url = broadcast ? liveUrl(broadcast.publicId) : '';
   return (
@@ -32,14 +64,72 @@ export default function LiveControls({
         </p>
       ) : (
         <>
+          {signedIn ? (
+            <p>
+              Signed in as {user.email || user.displayName || 'Google user'}.{' '}
+              <button
+                disabled={busy || connecting}
+                onClick={() =>
+                  void api
+                    ?.signOutPublisher()
+                    .catch(() =>
+                      setError('Could not sign out. Please try again.'),
+                    )
+                }
+              >
+                Sign out
+              </button>
+            </p>
+          ) : (
+            <>
+              <p>
+                Sign in with Google to publish. Anyone with the link can view
+                the score. Local scoring works without signing in.
+              </p>
+              <button
+                disabled={!api || user === undefined || connecting || !online}
+                onClick={async () => {
+                  if (!api) return;
+                  setConnecting(true);
+                  setError('');
+                  try {
+                    await api.signInPublisher();
+                  } catch (error) {
+                    const code = (error as { code?: string }).code;
+                    if (
+                      code !== 'auth/popup-closed-by-user' &&
+                      code !== 'auth/cancelled-popup-request'
+                    )
+                      setError(
+                        code === 'auth/popup-blocked'
+                          ? 'Allow pop-up windows for this site, then tap Sign in with Google again.'
+                          : 'Google sign-in could not finish. Please try again. Local scoring still works.',
+                      );
+                  } finally {
+                    setConnecting(false);
+                  }
+                }}
+              >
+                {connecting ? 'Signing in…' : 'Sign in with Google'}
+              </button>
+            </>
+          )}
+          {signedIn && broadcast && !ownsLink && (
+            <p role="alert">
+              Sign in with the Google account that started this live link to
+              publish updates.
+            </p>
+          )}
           {broadcast?.enabled ? (
             <>
               <p>
-                {!online
-                  ? 'Offline — changes will upload when you reconnect.'
-                  : pending
-                    ? status || 'Saved here. Live update pending…'
-                    : 'The latest saved score is published.'}
+                {!ownsLink
+                  ? 'Live updates are paused. Sign in with the match owner’s Google account to publish changes.'
+                  : !online
+                    ? 'Offline — changes will upload when you reconnect.'
+                    : pending
+                      ? status || 'Saved here. Live update pending…'
+                      : 'The latest saved score is published.'}
               </p>
               <div className="toolbar">
                 <button
@@ -89,13 +179,13 @@ export default function LiveControls({
                   : 'Let family and friends follow this match. Anyone with the link can view the score.'}
               </p>
               <button
-                disabled={busy || connecting || !online}
+                disabled={busy || connecting || !online || !ownsLink}
                 onClick={async () => {
                   setConnecting(true);
                   setError('');
                   try {
-                    const { publisherIdentity } = await import('./firebase');
-                    onStart(await publisherIdentity());
+                    if (!api) return;
+                    onStart(await api.publisherIdentity());
                   } catch {
                     setError(
                       'Could not connect live sharing. Check your connection and try again. Scoring still works.',

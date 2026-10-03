@@ -113,7 +113,7 @@
           ".validate": "false"
         },
         ".read": true,
-        ".write": "auth != null && newData.exists() && newData.child('ownerUid').val() == auth.uid && (!data.exists() || (data.child('ownerUid').val() == auth.uid && newData.child('revision').val() > data.child('revision').val()))"
+        ".write": "auth != null && auth.token.firebase.sign_in_provider == 'google.com' && newData.exists() && newData.child('ownerUid').val() == auth.uid && (!data.exists() || (data.child('ownerUid').val() == auth.uid && newData.child('revision').val() > data.child('revision').val()))"
       }
     }
   }

@@ -38,7 +38,14 @@ const payload = (revision = 1) => ({
   },
 });
 const owner = () =>
-  ref(env.authenticatedContext('owner').database(), 'matches/public-link');
+  ref(
+    env
+      .authenticatedContext('owner', {
+        firebase: { sign_in_provider: 'google.com', identities: {} },
+      })
+      .database(),
+    'matches/public-link',
+  );
 const visitor = () =>
   ref(env.unauthenticatedContext().database(), 'matches/public-link');
 it('lets link holders read scores, without granting collection listing or writes', async () => {
@@ -52,7 +59,14 @@ it('lets link holders read scores, without granting collection listing or writes
   await assertFails(set(visitor(), payload(2)));
   await assertFails(
     set(
-      ref(env.authenticatedContext('other').database(), 'matches/public-link'),
+      ref(
+        env
+          .authenticatedContext('other', {
+            firebase: { sign_in_provider: 'google.com', identities: {} },
+          })
+          .database(),
+        'matches/public-link',
+      ),
       { ...payload(2), ownerUid: 'other' },
     ),
   );
@@ -85,4 +99,18 @@ it('rejects non-image logos and incomplete published records', async () => {
   bad.match.home = { ...team, logo: 'https://example.com/track' };
   await assertFails(set(owner(), bad));
   await assertFails(set(owner(), { ...payload(), match: null }));
+});
+
+it('rejects anonymous publishing, including writes using the owner uid', async () => {
+  const anonymous = ref(
+    env
+      .authenticatedContext('owner', {
+        firebase: { sign_in_provider: 'anonymous', identities: {} },
+      })
+      .database(),
+    'matches/public-link',
+  );
+  await assertFails(set(anonymous, payload()));
+  await set(owner(), payload());
+  await assertFails(set(anonymous, payload(2)));
 });
