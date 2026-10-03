@@ -1,3 +1,4 @@
+import type { Broadcast, SyncEntry } from './live/model';
 export interface Team {
   id: string;
   name: string;
@@ -83,6 +84,8 @@ export interface AppState {
   activeSetId?: string;
 }
 export interface Snapshot {
+  broadcasts: Broadcast[];
+  syncQueue: SyncEntry[];
   teams: Team[];
   tournaments: Tournament[];
   matches: Match[];
@@ -91,6 +94,8 @@ export interface Snapshot {
   appState: AppState;
 }
 export const emptySnapshot = (): Snapshot => ({
+  broadcasts: [],
+  syncQueue: [],
   teams: [],
   tournaments: [],
   matches: [],

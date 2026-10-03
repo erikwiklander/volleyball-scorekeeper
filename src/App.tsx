@@ -1,3 +1,5 @@
+import LiveControls from './live/LiveControls';
+import { startLiveWorker } from './live/worker';
 import {
   applyUpdate,
   checkForUpdates,
@@ -124,6 +126,7 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [syncFlash]);
   const db = useRef<IDBPDatabase>(undefined);
+  const liveWorker = useRef<ReturnType<typeof startLiveWorker>>(undefined);
   const channel = useRef<BroadcastChannel>(undefined);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -135,8 +138,14 @@ export default function App() {
           return;
         }
         db.current = connection;
-        setData(await readSnapshot(connection));
+        const snapshot = await readSnapshot(connection);
+        if (!alive) {
+          connection.close();
+          return;
+        }
+        setData(snapshot);
         setReady(true);
+        liveWorker.current = startLiveWorker(connection);
       })
       .catch(() =>
         setError(
@@ -165,6 +174,7 @@ export default function App() {
         'Offline setup failed. Reconnect and reload before using the app offline.',
       );
     const connection = () => setOnline(navigator.onLine);
+    window.addEventListener('live-sync', refresh);
     window.addEventListener('offline-ready', available);
     window.addEventListener('offline-failed', failed);
     window.addEventListener('online', connection);
@@ -175,8 +185,10 @@ export default function App() {
     });
     return () => {
       alive = false;
+      liveWorker.current?.stop();
       db.current?.close();
       channel.current?.close();
+      window.removeEventListener('live-sync', refresh);
       window.removeEventListener('offline-ready', available);
       window.removeEventListener('offline-failed', failed);
       window.removeEventListener('online', connection);
@@ -243,6 +255,7 @@ export default function App() {
       const next = await mutate(db.current, change);
       setData(next);
       channel.current?.postMessage('changed');
+      void liveWorker.current?.wake();
       after?.();
     } catch (err) {
       setSyncFlash(undefined);
@@ -1060,6 +1073,44 @@ export default function App() {
                   </ol>
                 </section>
               )}
+              <LiveControls
+                key={match.id}
+                broadcast={data.broadcasts.find((b) => b.id === match.id)}
+                busy={busy}
+                online={online}
+                onStart={(ownerUid) => {
+                  void commit((d) => {
+                    if (!d.matches.some((m) => m.id === match.id))
+                      throw new Error('Match no longer exists.');
+                    const existing = d.broadcasts.find(
+                      (b) => b.id === match.id,
+                    );
+                    if (existing) {
+                      if (existing.ownerUid !== ownerUid)
+                        throw new Error(
+                          'This live link belongs to a different publishing identity.',
+                        );
+                      existing.enabled = true;
+                    } else
+                      d.broadcasts.push({
+                        id: match.id,
+                        publicId: id(),
+                        ownerUid,
+                        enabled: true,
+                        revision: 0,
+                        syncedRevision: 0,
+                      });
+                  });
+                }}
+                onStop={() => {
+                  void commit((d) => {
+                    const existing = d.broadcasts.find(
+                      (b) => b.id === match.id,
+                    );
+                    if (existing) existing.enabled = false;
+                  });
+                }}
+              />
               <details className="danger-zone">
                 <summary>Match management</summary>
                 <p>
@@ -1324,6 +1375,14 @@ export default function App() {
                   {modal.match.tournamentId ? ', the tournament,' : ''} and
                   other matches will be kept.
                 </p>
+                {data.broadcasts.some(
+                  (b) => b.id === modal.match.id && b.enabled,
+                ) && (
+                  <p>
+                    The live link will stop showing scores when this device
+                    connects.
+                  </p>
+                )}
               </>
             )}
             {modal.kind === 'delete' && (

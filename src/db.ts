@@ -1,6 +1,9 @@
+import { queueBroadcastChanges } from './live/model';
 import { openDB, type IDBPDatabase } from 'idb';
 import { emptySnapshot, type Snapshot } from './domain';
 const stores = [
+  'broadcasts',
+  'syncQueue',
   'teams',
   'tournaments',
   'matches',
@@ -9,8 +12,12 @@ const stores = [
   'appState',
 ] as const;
 export function openDatabase(name = 'volleyball-scorekeeper') {
-  return openDB(name, 2, {
+  return openDB(name, 3, {
     upgrade(db, oldVersion) {
+      if (oldVersion < 3) {
+        db.createObjectStore('broadcasts', { keyPath: 'id' });
+        db.createObjectStore('syncQueue', { keyPath: 'id' });
+      }
       if (oldVersion < 2) db.createObjectStore('teams', { keyPath: 'id' });
       if (oldVersion >= 1) return;
       db.createObjectStore('tournaments', { keyPath: 'id' });
@@ -31,11 +38,20 @@ export function openDatabase(name = 'volleyball-scorekeeper') {
 }
 export async function readSnapshot(db: IDBPDatabase): Promise<Snapshot> {
   const tx = db.transaction([...stores], 'readonly');
-  const [teams, tournaments, matches, sets, events, state] = await Promise.all(
-    stores.map((s) => tx.objectStore(s).getAll()),
-  );
+  const [
+    broadcasts,
+    syncQueue,
+    teams,
+    tournaments,
+    matches,
+    sets,
+    events,
+    state,
+  ] = await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
   await tx.done;
   return {
+    broadcasts,
+    syncQueue,
     teams,
     tournaments,
     matches,
@@ -52,9 +68,19 @@ export async function mutate(
 ): Promise<Snapshot> {
   const tx = db.transaction([...stores], 'readwrite', { durability: 'strict' });
   try {
-    const [teams, tournaments, matches, sets, events, state] =
-      await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
+    const [
+      broadcasts,
+      syncQueue,
+      teams,
+      tournaments,
+      matches,
+      sets,
+      events,
+      state,
+    ] = await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
     const data: Snapshot = {
+      broadcasts,
+      syncQueue,
       teams,
       tournaments,
       matches,
@@ -64,7 +90,10 @@ export async function mutate(
     };
     const before = structuredClone(data);
     change(data);
+    queueBroadcastChanges(before, data);
     for (const name of [
+      'broadcasts',
+      'syncQueue',
       'teams',
       'tournaments',
       'matches',

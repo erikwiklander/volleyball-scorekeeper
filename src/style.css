@@ -1004,3 +1004,84 @@ dialog.sync-white {
 .app-updates > button {
   font-size: 0.8rem;
 }
+
+.live-controls {
+  border: 1px solid #d8ddd4;
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 24px;
+}
+.live-controls h2 {
+  margin-top: 0;
+}
+.live-controls small {
+  display: block;
+  margin-top: 12px;
+}
+.live-link {
+  width: 100%;
+  margin-top: 14px;
+  font-size: 0.8rem;
+}
+.public-scoreboard {
+  max-width: 780px;
+}
+.public-scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.public-team {
+  background: #fff;
+  border-radius: 16px;
+  border-top: 6px solid;
+  padding: 20px 12px;
+  text-align: center;
+}
+.public-team h2 {
+  min-height: 3em;
+  margin: 12px 0 0;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+.public-points {
+  font-size: clamp(4rem, 18vw, 7rem);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.public-logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+.public-set {
+  text-align: center;
+  font-weight: 700;
+}
+.public-history caption {
+  text-align: left;
+  font-weight: 700;
+  margin: 20px 0 10px;
+}
+.public-history .current {
+  background: #e6edbc;
+  color: #173d31;
+  font-weight: 800;
+}
+.live-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #8d9588;
+}
+.live-dot.connected {
+  background: #27783b;
+}

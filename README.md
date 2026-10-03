@@ -1,6 +1,6 @@
 # Volleyball Scorekeeper
 
-A phone-first, offline volleyball scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. No backend, account, or external fonts. Scoring never depends on network access.
+A phone-first, offline volleyball scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. Scoring never depends on network access. Optional live sharing uses Firebase; spectators need no account.
 
 ## Run locally
 
@@ -59,7 +59,7 @@ On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android,
 
 Every action captures `Date.now()` at the handler before writing. ISO timestamps are UTC with milliseconds; `epochMs` is the authoritative instant. Device time must be set accurately. Event ordering for display/export is epoch milliseconds, then creation sequence, then ID. Undo targets use creation sequence so clock rollback cannot undo the wrong point.
 
-IndexedDB uses six stores: teams, tournaments, matches, sets, events, appState. Mutations read and write within a single strict-durability transaction; React updates only after commit. Concurrent tabs serialize writes and receive refresh notifications. Buttons are briefly disabled during a write. A failed save is visibly reported; it is never displayed as a successful point. Events use insert-only writes, except explicit match or tournament deletion. Scores are reconstructed from point and undo events. No running timer is required.
+IndexedDB uses eight stores: teams, tournaments, matches, sets, events, appState, broadcasts, syncQueue. Mutations read and write within a single strict-durability transaction; React updates only after commit. Concurrent tabs serialize writes and receive refresh notifications. Buttons are briefly disabled during a write. A failed save is visibly reported; it is never displayed as a successful point. Events use insert-only writes, except explicit match or tournament deletion. Scores are reconstructed from point and undo events. No running timer is required.
 
 The app requests persistent browser storage and a screen wake lock when supported. Browser storage can still be cleared or evicted; no browser app can guarantee data survives clearing site data, private sessions, uninstall behavior, or device loss. Export backups regularly. Storage is specific to the browser/profile/origin. Changing the site domain or GitHub repository path can affect access; export before moving the site.
 
@@ -94,3 +94,22 @@ The footer shows the app version and seven-character build commit. Local modifie
 ### Standalone games
 
 Matches and events may omit `tournamentId`. No placeholder tournament is created. A standalone game backup uses the same version 2 JSON envelope (`matches`, `sets`, `events`) with exactly one match and no `tournament` property. CSV tournament columns are blank for these games. Import restores a standalone game with new IDs and preserves its scoring history; existing tournament backups remain supported.
+
+### Live score sharing
+
+Open a match, choose **Start live sharing**, then **Share live score**. Anyone with the link can follow the score without signing in. The page shows team colors/logos, the current score, set history, final results, and when the latest score arrived. After 90 seconds without an update it says **Waiting for updates**; this is not a claim that the scorer is disconnected. Viewers reconnect automatically.
+
+Scoring and the latest pending broadcast snapshot are committed in the same IndexedDB transaction. Uploads run separately, retry on reconnect, and coalesce offline changes. Server-enforced increasing revisions prevent delayed uploads or another tab from replacing a newer score. Sharing requires an initial connection; subsequent scoring works offline. Keep or reopen the scorer app while connected to send pending updates—iOS does not guarantee background uploads.
+
+**Stop sharing**, match deletion, and tournament deletion queue a withdrawal. If offline, the last published score remains visible until this device reconnects with the app open. An ownership/revision record remains in Firebase after withdrawal, with the score removed, to reject delayed uploads. Backups contain scoring data but do not copy publishing identities or live links. Clearing site data loses the anonymous publishing identity as well as local matches.
+
+Deployment uses project `ew-volleyball-scorekeeper`. The scorer stays on GitHub Pages; public links use Firebase Hosting. To configure another project, enable Anonymous authentication, create a Realtime Database, and deploy `database.rules.json`. Copy `.env.example` to `.env.local` and fill `VITE_FIREBASE_CONFIG` with the public web-app configuration. Set `VITE_LIVE_BASE_URL` to the viewer hosting URL. These are public settings, not service-account credentials. GitHub Actions reads the corresponding repository variables. With no configuration the app still scores locally.
+
+```sh
+npx firebase login --no-localhost
+npm run test:live
+npm run build
+npx firebase deploy --only database,hosting
+```
+
+Live tests require Java 21+ for Firebase's local emulator, plus installed Chromium and WebKit. On macOS, `brew install openjdk@21` is sufficient; the test runner detects Homebrew's installation without changing your shell's Java default. The suite builds into `dist-live` using a demo project and never uses production Firebase. It verifies access rules, public viewing, offline points/undo/reload, set results, stopping, and deletion. CI runs these tests before deploying. Firebase Hosting and database rules are deployed separately with the signed-in Firebase CLI.

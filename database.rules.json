@@ -1,0 +1,120 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "matches": {
+      "$publicId": {
+        ".validate": "newData.hasChildren([\"schemaVersion\", \"ownerUid\", \"revision\", \"published\", \"updatedAt\"]) && (newData.child('published').val() == newData.child('match').exists())",
+        "schemaVersion": {
+          ".validate": "newData.val() == 1"
+        },
+        "ownerUid": {
+          ".validate": "newData.isString() && newData.val().length <= 128"
+        },
+        "revision": {
+          ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() % 1 == 0"
+        },
+        "published": {
+          ".validate": "newData.isBoolean()"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber() && newData.val() == now"
+        },
+        "match": {
+          ".validate": "newData.hasChildren([\"home\", \"away\", \"status\", \"tournament\", \"location\", \"currentSet\", \"result\"])",
+          "home": {
+            ".validate": "newData.hasChildren([\"name\", \"shortName\", \"color\", \"logo\"])",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "shortName": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "color": {
+              ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)"
+            },
+            "logo": {
+              ".validate": "newData.isString() && newData.val().length <= 1500000 && (newData.val() == '' || newData.val().matches(/^data:image\\/(png|jpeg|webp);base64,[A-Za-z0-9+\\/=]+$/))"
+            },
+            "$other": {
+              ".validate": "false"
+            }
+          },
+          "away": {
+            ".validate": "newData.hasChildren([\"name\", \"shortName\", \"color\", \"logo\"])",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "shortName": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "color": {
+              ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)"
+            },
+            "logo": {
+              ".validate": "newData.isString() && newData.val().length <= 1500000 && (newData.val() == '' || newData.val().matches(/^data:image\\/(png|jpeg|webp);base64,[A-Za-z0-9+\\/=]+$/))"
+            },
+            "$other": {
+              ".validate": "false"
+            }
+          },
+          "status": {
+            ".validate": "newData.val() == 'not_started' || newData.val() == 'in_progress' || newData.val() == 'completed'"
+          },
+          "tournament": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "location": {
+            ".validate": "newData.isString() && newData.val().length <= 160"
+          },
+          "currentSet": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+          },
+          "result": {
+            ".validate": "newData.hasChildren([\"home\", \"away\", \"tied\"])",
+            "home": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+            },
+            "away": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+            },
+            "tied": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+            },
+            "$other": {
+              ".validate": "false"
+            }
+          },
+          "sets": {
+            "$set": {
+              ".validate": "newData.hasChildren([\"setNumber\", \"homeScore\", \"awayScore\", \"completed\"])",
+              "setNumber": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+              },
+              "homeScore": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+              },
+              "awayScore": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0"
+              },
+              "completed": {
+                ".validate": "newData.isBoolean()"
+              },
+              "$other": {
+                ".validate": "false"
+              }
+            }
+          },
+          "$other": {
+            ".validate": "false"
+          }
+        },
+        "$other": {
+          ".validate": "false"
+        },
+        ".read": true,
+        ".write": "auth != null && newData.exists() && newData.child('ownerUid').val() == auth.uid && (!data.exists() || (data.child('ownerUid').val() == auth.uid && newData.child('revision').val() > data.child('revision').val()))"
+      }
+    }
+  }
+}

@@ -21,8 +21,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          VITE_FIREBASE_CONFIG: ${{ vars.VITE_FIREBASE_CONFIG }}
+          VITE_LIVE_BASE_URL: ${{ vars.VITE_LIVE_BASE_URL }}
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm run test:live
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name != 'pull_request'
         with:

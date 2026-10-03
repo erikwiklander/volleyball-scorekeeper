@@ -4,3 +4,13 @@ dist/
 playwright-report/
 test-results/
 .DS_Store
+
+.env
+.env.local
+.env.*.local
+.firebase/
+*-debug.log
+
+dist-live/
+
+live-test-results/

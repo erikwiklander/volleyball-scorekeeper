@@ -1,0 +1,95 @@
+import { initializeApp } from 'firebase/app';
+import {
+  connectAuthEmulator,
+  initializeAuth,
+  indexedDBLocalPersistence,
+  signInAnonymously,
+} from 'firebase/auth';
+import {
+  connectDatabaseEmulator,
+  getDatabase,
+  onValue,
+  ref,
+  runTransaction,
+  serverTimestamp,
+} from 'firebase/database';
+import { liveConfig } from './config';
+import type { SyncEntry } from './model';
+const config = liveConfig();
+if (!config) throw new Error('Live scores have not been connected yet.');
+const app = initializeApp(config, 'live-scores');
+const database = getDatabase(app);
+const emulator =
+  import.meta.env.VITE_FIREBASE_EMULATORS === 'true' &&
+  ['localhost', '127.0.0.1'].includes(location.hostname);
+if (emulator) connectDatabaseEmulator(database, '127.0.0.1', 9000);
+let publisherAuth: ReturnType<typeof initializeAuth> | undefined;
+let identity: Promise<string> | undefined;
+export async function publisherIdentity() {
+  if (!identity)
+    identity = (async () => {
+      if (!publisherAuth) {
+        // Anonymous publishing needs persistent identity, but no popup/redirect iframe.
+        publisherAuth = initializeAuth(app, {
+          persistence: indexedDBLocalPersistence,
+        });
+        if (emulator)
+          connectAuthEmulator(publisherAuth, 'http://127.0.0.1:9099', {
+            disableWarnings: true,
+          });
+      }
+      const auth = publisherAuth;
+      await auth.authStateReady();
+      return auth.currentUser?.uid ?? (await signInAnonymously(auth)).user.uid;
+    })().catch((error) => {
+      identity = undefined;
+      throw error;
+    });
+  return identity;
+}
+export async function publish(entry: SyncEntry) {
+  if ((await publisherIdentity()) !== entry.ownerUid)
+    throw new Error(
+      'The original publishing identity is unavailable in this browser.',
+    );
+  await runTransaction(
+    ref(database, `matches/${entry.id}`),
+    (current) => {
+      if (current && current.ownerUid !== entry.ownerUid) return; // Rules also enforce ownership.
+      if (current && current.revision >= entry.revision) return;
+      return {
+        schemaVersion: 1,
+        ownerUid: entry.ownerUid,
+        revision: entry.revision,
+        published: entry.match !== null,
+        match: entry.match,
+        updatedAt: serverTimestamp(),
+      };
+    },
+    { applyLocally: false },
+  ).then((result) => {
+    const current = result.snapshot.val();
+    if (
+      !current ||
+      current.ownerUid !== entry.ownerUid ||
+      current.revision < entry.revision
+    )
+      throw new Error('Live score update was not accepted.');
+  });
+}
+export function watchMatch(
+  id: string,
+  onData: (data: unknown) => void,
+  onError: (error: Error) => void,
+) {
+  return onValue(
+    ref(database, `matches/${id}`),
+    (snapshot) => onData(snapshot.val()),
+    onError,
+  );
+}
+export function watchConnection(onConnected: (connected: boolean) => void) {
+  return onValue(ref(database, '.info/connected'), (snapshot) =>
+    onConnected(snapshot.val() === true),
+  );
+}
