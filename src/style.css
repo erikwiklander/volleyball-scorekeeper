@@ -1141,3 +1141,7 @@ dialog.sync-white {
 .football-team h2 {
   margin: 0 0 8px;
 }
+
+.football-scoring .scoring-actions {
+  position: static;
+}

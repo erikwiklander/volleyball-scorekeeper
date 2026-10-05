@@ -32,6 +32,13 @@ test('football quarters, Pop Warner scoring, undo and offline recovery', async (
   const right = await page.locator('.football-team').last().boundingBox();
   expect(left!.y).toBe(right!.y);
   expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x);
+  const lastScore = await home
+    .getByRole('button', { name: 'Safety +2', exact: true })
+    .boundingBox();
+  const undo = await page
+    .getByRole('button', { name: 'Undo last score' })
+    .boundingBox();
+  expect(lastScore!.y + lastScore!.height).toBeLessThanOrEqual(undo!.y);
   await page.screenshot({
     path: testInfo.outputPath('football-mobile.png'),
     fullPage: true,
