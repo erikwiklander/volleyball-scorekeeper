@@ -114,3 +114,24 @@ it('rejects anonymous publishing, including writes using the owner uid', async (
   await set(owner(), payload());
   await assertFails(set(anonymous, payload(2)));
 });
+
+it('accepts football snapshots and rejects unsupported sports', async () => {
+  const data = payload();
+  await assertSucceeds(
+    set(owner(), {
+      ...data,
+      match: {
+        ...data.match,
+        sport: 'football',
+        currentSet: 2,
+        sets: {
+          s1: { setNumber: 1, homeScore: 8, awayScore: 7, completed: true },
+        },
+      },
+    }),
+  );
+  const next = payload(2);
+  await assertFails(
+    set(owner(), { ...next, match: { ...next.match, sport: 'unknown' } }),
+  );
+});

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { matchResult, setScore, type Snapshot } from '../domain';
+import { matchResult, setScore, sportOf, type Snapshot } from '../domain';
 import { HOME_COLOR, AWAY_COLOR } from '../colors';
 
 const teamSchema = z.object({
@@ -17,6 +17,7 @@ const teamSchema = z.object({
 });
 const score = z.number().int().nonnegative();
 export const publicMatchSchema = z.object({
+  sport: z.enum(['volleyball', 'football']).optional(),
   home: teamSchema,
   away: teamSchema,
   status: z.enum(['not_started', 'in_progress', 'completed']),
@@ -69,6 +70,7 @@ export function publicMatch(data: Snapshot, matchId: string): PublicMatch {
     .filter((s) => s.matchId === matchId)
     .sort((a, b) => a.setNumber - b.setNumber);
   return {
+    sport: sportOf(match),
     home: {
       name: match.homeTeam,
       shortName: match.home?.shortName ?? '',

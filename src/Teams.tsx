@@ -1,3 +1,4 @@
+import { sportOf, type Sport } from './domain';
 import { useEffect, useRef, useState } from 'react';
 import { AWAY_COLOR, HOME_COLOR } from './colors';
 import { id, type Team, type TeamDraft } from './domain';
@@ -154,16 +155,23 @@ function TeamFields({
 }
 
 export function MatchSetup({
-  teams,
+  teams: allTeams,
+  initialSport = 'volleyball',
   defaultTeamId,
   defaultTeamName,
   onLoading,
 }: {
   teams: Team[];
+  initialSport?: Sport;
   defaultTeamId?: string;
   defaultTeamName?: string;
   onLoading: (loading: boolean) => void;
 }) {
+  const [sport, setSport] = useState<Sport>(() => {
+    const team = allTeams.find((t) => t.id === defaultTeamId);
+    return team ? sportOf(team) : initialSport;
+  });
+  const teams = allTeams.filter((t) => sportOf(t) === sport);
   const defaultTeam = teams.find((t) => t.id === defaultTeamId);
   const [home, setHome] = useState<TeamDraft>(() =>
     defaultTeam
@@ -219,6 +227,22 @@ export function MatchSetup({
   }
   return (
     <fieldset disabled={loading} className="match-setup">
+      <label>
+        Sport
+        <select
+          name="sport"
+          value={sport}
+          onChange={(e) => {
+            const next = e.target.value as Sport;
+            setSport(next);
+            setHome({ ...blank(HOME_COLOR), sport: next });
+            setAway({ ...blank(AWAY_COLOR), sport: next });
+          }}
+        >
+          <option value="volleyball">Volleyball</option>
+          <option value="football">Football · Pop Warner tackle</option>
+        </select>
+      </label>
       {side('Home team', home, setHome, HOME_COLOR)}
       <button
         type="button"
@@ -231,11 +255,20 @@ export function MatchSetup({
         ⇅ Swap home / away
       </button>
       {side('Away team', away, setAway, AWAY_COLOR)}
-      <input type="hidden" name="homeAppearance" value={JSON.stringify(home)} />
-      <input type="hidden" name="awayAppearance" value={JSON.stringify(away)} />
+      <input
+        type="hidden"
+        name="homeAppearance"
+        value={JSON.stringify({ ...home, sport })}
+      />
+      <input
+        type="hidden"
+        name="awayAppearance"
+        value={JSON.stringify({ ...away, sport })}
+      />
       <p className="muted">
-        Pick colors you’ll recognize on court. You’ll start Set 1 when play
-        begins.
+        {sport === 'football'
+          ? 'Four quarters, then overtime if needed. Extra-point kick: 2 points; run / pass conversion: 1 point.'
+          : 'Pick colors you’ll recognize on court. You’ll start Set 1 when play begins.'}
       </p>
     </fieldset>
   );
@@ -243,11 +276,13 @@ export function MatchSetup({
 
 export function TeamLibrary({
   teams,
+  initialSport = 'volleyball',
   busy,
   onSave,
   error,
 }: {
   teams: Team[];
+  initialSport?: Sport;
   error: string;
   busy: boolean;
   onSave: (team: Team, done: () => void) => void;
@@ -258,7 +293,9 @@ export function TeamLibrary({
   const [loading, setLoading] = useState(false);
   function open(team?: Team) {
     setEditing(team);
-    setDraft(team ? fromTeam(team) : blank(HOME_COLOR));
+    setDraft(
+      team ? fromTeam(team) : { ...blank(HOME_COLOR), sport: initialSport },
+    );
     dialog.current?.showModal();
   }
   return (
@@ -289,7 +326,10 @@ export function TeamLibrary({
             />
             <span>
               <strong>{team.name}</strong>
-              <small>{team.shortName || 'Edit team'}</small>
+              <small>
+                {team.shortName || 'Edit team'}
+                {sportOf(team) === 'football' ? ' · Football' : ''}
+              </small>
             </span>
           </button>
         ))}
@@ -308,6 +348,7 @@ export function TeamLibrary({
             onSave(
               {
                 id: editing?.id ?? id(),
+                sport: draft.sport,
                 name: draft.name.trim(),
                 shortName: draft.shortName,
                 logo: draft.logo,
@@ -321,6 +362,19 @@ export function TeamLibrary({
           }}
         >
           <h2>{editing ? 'Edit team' : 'Add team'}</h2>
+          <label>
+            Sport
+            <select
+              value={sportOf(draft)}
+              disabled={!!editing || busy || loading}
+              onChange={(e) =>
+                setDraft({ ...draft, sport: e.target.value as Sport })
+              }
+            >
+              <option value="volleyball">Volleyball</option>
+              <option value="football">Football</option>
+            </select>
+          </label>
           {error && (
             <p role="alert" className="error">
               {error}

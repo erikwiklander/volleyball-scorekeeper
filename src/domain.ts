@@ -1,5 +1,23 @@
 import type { Broadcast, SyncEntry } from './live/model';
+export type Sport = 'volleyball' | 'football';
+export const sportOf = (record?: { sport?: Sport }): Sport =>
+  record?.sport ?? 'volleyball';
+export const periodLabel = (sport: Sport, number: number) =>
+  sport === 'football'
+    ? number > 4
+      ? `OT ${number - 4}`
+      : `Quarter ${number}`
+    : `Set ${number}`;
+export const footballScores = {
+  touchdown: { label: 'Touchdown', points: 6 },
+  kick: { label: 'Extra-point kick', points: 2 },
+  conversion: { label: 'Run / pass conversion', points: 1 },
+  fieldGoal: { label: 'Field goal', points: 3 },
+  safety: { label: 'Safety', points: 2 },
+} as const;
+export type FootballScore = keyof typeof footballScores;
 export interface Team {
+  sport?: Sport;
   id: string;
   name: string;
   shortName?: string;
@@ -29,6 +47,7 @@ export interface Tournament {
   updatedAt: string;
 }
 export interface Match {
+  sport?: Sport;
   id: string;
   tournamentId?: string;
   home?: MatchTeam;
@@ -43,6 +62,8 @@ export interface Match {
   createdAt: string;
   updatedAt: string;
 }
+// The existing sets store holds volleyball sets or football quarters/overtime.
+// Keeping its IDs and references preserves older local records and backups.
 export interface VolleyballSet {
   id: string;
   matchId: string;
@@ -71,6 +92,7 @@ export interface ScoreEvent {
   epochMs: number;
   sequence: number;
   action: ScoreAction;
+  scoringType?: FootballScore;
   homeScore: number;
   awayScore: number;
   targetEventId?: string;
@@ -128,8 +150,14 @@ export function activePoints(events: ScoreEvent[]) {
 export function calculateScore(events: ScoreEvent[]) {
   return activePoints(events).reduce(
     (score, e) => ({
-      homeScore: score.homeScore + Number(e.action === 'HOME_POINT'),
-      awayScore: score.awayScore + Number(e.action === 'AWAY_POINT'),
+      homeScore:
+        score.homeScore +
+        Number(e.action === 'HOME_POINT') *
+          (e.scoringType ? footballScores[e.scoringType].points : 1),
+      awayScore:
+        score.awayScore +
+        Number(e.action === 'AWAY_POINT') *
+          (e.scoringType ? footballScores[e.scoringType].points : 1),
     }),
     { homeScore: 0, awayScore: 0 },
   );
@@ -138,6 +166,12 @@ export function setScore(data: Snapshot, setId: string) {
   return calculateScore(data.events.filter((e) => e.setId === setId));
 }
 export function matchResult(data: Snapshot, matchId: string) {
+  if (sportOf(data.matches.find((m) => m.id === matchId)) === 'football') {
+    const total = calculateScore(
+      data.events.filter((e) => e.matchId === matchId),
+    );
+    return { home: total.homeScore, away: total.awayScore, tied: 0 };
+  }
   return data.sets
     .filter((s) => s.matchId === matchId && s.completedAt)
     .reduce(
@@ -159,6 +193,7 @@ export function appendEvent(
   epochMs: number,
   set?: VolleyballSet,
   targetEventId?: string,
+  scoringType?: FootballScore,
 ) {
   const event: ScoreEvent = {
     id: id(),
@@ -173,6 +208,7 @@ export function appendEvent(
     homeScore: 0,
     awayScore: 0,
     targetEventId,
+    ...(scoringType ? { scoringType } : {}),
   };
   if (action === 'SYNC_MARKER') {
     const markers = data.events.filter(
@@ -184,7 +220,11 @@ export function appendEvent(
   data.events.push(event);
   Object.assign(
     event,
-    set ? setScore(data, set.id) : { homeScore: 0, awayScore: 0 },
+    sportOf(match) === 'football'
+      ? calculateScore(data.events.filter((e) => e.matchId === match.id))
+      : set
+        ? setScore(data, set.id)
+        : { homeScore: 0, awayScore: 0 },
   );
   match.updatedAt = event.timestamp;
   return event;
@@ -195,6 +235,7 @@ export function scoreAction(
   setId: string,
   action: 'HOME_POINT' | 'AWAY_POINT' | 'UNDO' | 'SYNC_MARKER',
   at: number,
+  scoringType?: FootballScore,
 ) {
   const match = data.matches.find((m) => m.id === matchId);
   const set = data.sets.find((s) => s.id === setId && s.matchId === matchId);
@@ -202,13 +243,21 @@ export function scoreAction(
     throw new Error(
       'This set is no longer active. Reopen the match to see its latest state.',
     );
+  if (action === 'HOME_POINT' || action === 'AWAY_POINT') {
+    if (
+      sportOf(match) === 'football'
+        ? !scoringType || !Object.hasOwn(footballScores, scoringType)
+        : !!scoringType
+    )
+      throw new Error('Choose a scoring action for this sport.');
+  } else if (scoringType) throw new Error('Invalid scoring action.');
   const target =
     action === 'UNDO'
       ? activePoints(data.events.filter((e) => e.setId === setId)).at(-1)
       : undefined;
   if (action === 'UNDO' && !target)
     throw new Error('There are no points left to undo.');
-  appendEvent(data, match, action, at, set, target?.id);
+  appendEvent(data, match, action, at, set, target?.id, scoringType);
   data.appState = {
     id: 'current',
     activeTournamentId: match.tournamentId,
@@ -301,6 +350,7 @@ export function syncMarker(
 }
 
 export interface TeamDraft {
+  sport?: Sport;
   teamId?: string;
   name: string;
   shortName?: string;
@@ -315,12 +365,16 @@ export function saveAppearance(
 ): MatchTeam {
   if (!draft.name.trim()) throw new Error('Enter both team names.');
   let teamId = draft.teamId;
-  if (teamId && !data.teams.some((t) => t.id === teamId))
+  if (
+    teamId &&
+    !data.teams.some((t) => t.id === teamId && sportOf(t) === sportOf(draft))
+  )
     throw new Error('Selected team no longer exists.');
   if (!teamId) {
     teamId = id();
     data.teams.push({
       id: teamId,
+      sport: draft.sport,
       name: draft.name.trim(),
       shortName: draft.shortName,
       primaryColor: draft.primaryColor,

@@ -107,6 +107,9 @@
           },
           "$other": {
             ".validate": "false"
+          },
+          "sport": {
+            ".validate": "newData.val() == 'volleyball' || newData.val() == 'football'"
           }
         },
         "$other": {

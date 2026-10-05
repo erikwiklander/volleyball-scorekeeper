@@ -1,3 +1,4 @@
+import { periodLabel, sportOf } from '../domain';
 import { useEffect, useState } from 'react';
 import { liveConfig } from './config';
 import { publicBroadcastSchema, type PublicBroadcast } from './model';
@@ -72,6 +73,14 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
     (a, b) => a.setNumber - b.setNumber,
   );
   const current = sets.find((s) => s.setNumber === match?.currentSet);
+  const football = sportOf(match) === 'football';
+  const totals = sets.reduce(
+    (sum, period) => ({
+      homeScore: sum.homeScore + period.homeScore,
+      awayScore: sum.awayScore + period.awayScore,
+    }),
+    { homeScore: 0, awayScore: 0 },
+  );
   const stale = !!broadcast && now - broadcast.updatedAt > 90_000;
   const status =
     match?.status === 'completed'
@@ -107,7 +116,10 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
           </section>
         ) : (
           <>
-            <p className="eyebrow">{match.tournament || 'VOLLEYBALL'}</p>
+            <p className="eyebrow">
+              {match.tournament ||
+                (football ? 'FOOTBALL · POP WARNER TACKLE' : 'VOLLEYBALL')}
+            </p>
             <h1>
               {match.home.name} <span className="muted">vs</span>{' '}
               {match.away.name}
@@ -138,8 +150,9 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
                   )}
                   <h2>{match[side].shortName || match[side].name}</h2>
                   <strong className="public-points">
-                    {current?.[side === 'home' ? 'homeScore' : 'awayScore'] ??
-                      0}
+                    {(football ? totals : current)?.[
+                      side === 'home' ? 'homeScore' : 'awayScore'
+                    ] ?? 0}
                   </strong>
                 </div>
               ))}
@@ -147,15 +160,32 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
             <p className="public-set">
               {match.status === 'completed'
                 ? 'Match complete'
-                : match.currentSet
-                  ? `Set ${match.currentSet}${current?.completed ? ' · Between sets' : ''}`
-                  : 'Ready for Set 1'}{' '}
-              · Sets {match.result.home}–{match.result.away}
+                : football
+                  ? !match.currentSet
+                    ? 'Ready for Quarter 1'
+                    : current?.completed
+                      ? match.currentSet === 2
+                        ? 'Halftime'
+                        : match.currentSet >= 4
+                          ? `End of ${match.currentSet === 4 ? 'regulation' : periodLabel('football', match.currentSet)}`
+                          : 'Between quarters'
+                      : periodLabel('football', match.currentSet)
+                  : match.currentSet
+                    ? `Set ${match.currentSet}${current?.completed ? ' · Between sets' : ''}`
+                    : 'Ready for Set 1'}
+              {!football && (
+                <>
+                  {' '}
+                  · Sets {match.result.home}–{match.result.away}
+                </>
+              )}
             </p>
             {sets.length > 0 && (
               <div className="table-wrap">
                 <table className="public-history">
-                  <caption>Set scores</caption>
+                  <caption>
+                    {football ? 'Quarter scores' : 'Set scores'}
+                  </caption>
                   <thead>
                     <tr>
                       <th>Team</th>
@@ -166,7 +196,11 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
                             set.setNumber === match.currentSet ? 'current' : ''
                           }
                         >
-                          S{set.setNumber}
+                          {football
+                            ? set.setNumber > 4
+                              ? `OT${set.setNumber - 4}`
+                              : `Q${set.setNumber}`
+                            : `S${set.setNumber}`}
                         </th>
                       ))}
                     </tr>
@@ -212,7 +246,7 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
         )}
       </main>
       <footer>
-        <span>VOLLEYBALL SCOREKEEPER</span>
+        <span>SCOREKEEPER</span>
         <span className="build-version">
           v{__APP_VERSION__} · {__BUILD_REVISION__}
         </span>

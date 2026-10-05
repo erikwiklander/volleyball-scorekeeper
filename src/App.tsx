@@ -1,3 +1,11 @@
+import FootballScorer from './FootballScorer';
+import {
+  calculateScore,
+  periodLabel,
+  sportOf,
+  footballScores,
+  type Sport,
+} from './domain';
 import LiveControls from './live/LiveControls';
 import { startLiveWorker } from './live/worker';
 import {
@@ -79,6 +87,7 @@ export default function App() {
   const updates = useSyncExternalStore(subscribeUpdates, getUpdateState);
   const [data, setData] = useState<Snapshot>(emptySnapshot);
   const [ready, setReady] = useState(false);
+  const [sportFilter, setSportFilter] = useState<Sport | 'all'>('all');
   const [busy, setBusy] = useState(false);
   const [logoLoading, setLogoLoading] = useState(false);
   const saving = useRef(false);
@@ -445,6 +454,7 @@ export default function App() {
           const away = saveAppearance(d, awayDraft, now);
           d.matches.push({
             id: matchId,
+            sport: value('sport') === 'football' ? 'football' : 'volleyball',
             tournamentId,
             home,
             away,
@@ -509,11 +519,13 @@ export default function App() {
       );
     }
   }
+  const acceptsSport = (m: Match) =>
+    sportFilter === 'all' || sportOf(m) === sportFilter;
   const standaloneGames = data.matches
-    .filter((m) => !m.tournamentId)
+    .filter((m) => !m.tournamentId && acceptsSport(m))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const unfinished = data.matches
-    .filter((m) => m.status !== 'completed')
+    .filter((m) => m.status !== 'completed' && acceptsSport(m))
     .sort(
       (a, b) =>
         Number(b.id === data.appState.activeMatchId) -
@@ -536,13 +548,20 @@ export default function App() {
             {m.homeTeam} <span className="muted">vs</span> {m.awayTeam}
           </strong>
           <small>
-            {m.status === 'completed'
-              ? `Final · ${result.home}–${result.away} sets${result.tied ? ` · ${result.tied} tied` : ''}`
-              : active
-                ? `In progress · Set ${active.setNumber} · ${score!.homeScore}–${score!.awayScore}`
-                : m.status === 'not_started'
-                  ? 'Ready to start Set 1'
-                  : 'Between sets · Ready to resume'}
+            {sportOf(m) === 'football'
+              ? (() => {
+                  const total = calculateScore(
+                    data.events.filter((e) => e.matchId === m.id),
+                  );
+                  return `Football · ${m.status === 'completed' ? 'Final' : active ? periodLabel('football', active.setNumber) : 'Ready to resume'} · ${total.homeScore}–${total.awayScore}`;
+                })()
+              : m.status === 'completed'
+                ? `Final · ${result.home}–${result.away} sets${result.tied ? ` · ${result.tied} tied` : ''}`
+                : active
+                  ? `In progress · Set ${active.setNumber} · ${score!.homeScore}–${score!.awayScore}`
+                  : m.status === 'not_started'
+                    ? 'Ready to start Set 1'
+                    : 'Between sets · Ready to resume'}
           </small>
         </span>
         <span aria-hidden="true">↗</span>
@@ -560,7 +579,7 @@ export default function App() {
           ◉
         </div>
         <div>
-          <span className="eyebrow">COURTSIDE COMPANION</span>
+          <span className="eyebrow">YOUR SIDELINE COMPANION</span>
           <div className="brand-title">
             Scorekeeper<span className="brand-dot">.</span>
           </div>
@@ -602,6 +621,25 @@ export default function App() {
                   + New game
                 </button>
               </div>
+              <div
+                className="toolbar sport-filter"
+                role="group"
+                aria-label="Filter games by sport"
+              >
+                {(['all', 'volleyball', 'football'] as const).map((sport) => (
+                  <button
+                    key={sport}
+                    aria-pressed={sportFilter === sport}
+                    onClick={() => setSportFilter(sport)}
+                  >
+                    {sport === 'all'
+                      ? 'All sports'
+                      : sport === 'volleyball'
+                        ? 'Volleyball'
+                        : 'Football'}
+                  </button>
+                ))}
+              </div>
               {unfinished.length > 0 && (
                 <section className="resume">
                   <span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span>
@@ -616,9 +654,16 @@ export default function App() {
                       const s = data.sets.find(
                         (s) => s.matchId === unfinished[0].id && !s.completedAt,
                       );
-                      const v = s && setScore(data, s.id);
+                      const v =
+                        sportOf(unfinished[0]) === 'football'
+                          ? calculateScore(
+                              data.events.filter(
+                                (e) => e.matchId === unfinished[0].id,
+                              ),
+                            )
+                          : s && setScore(data, s.id);
                       return s
-                        ? ` · Set ${s.setNumber} · ${v!.homeScore}–${v!.awayScore}`
+                        ? ` · ${periodLabel(sportOf(unfinished[0]), s.setNumber)} · ${v!.homeScore}–${v!.awayScore}`
                         : ' · Ready to resume';
                     })()}
                   </p>
@@ -653,8 +698,13 @@ export default function App() {
                 )}
               </section>
               <TeamLibrary
+                initialSport={
+                  sportFilter === 'football' ? 'football' : 'volleyball'
+                }
                 error={error}
-                teams={data.teams}
+                teams={data.teams.filter(
+                  (t) => sportFilter === 'all' || sportOf(t) === sportFilter,
+                )}
                 busy={busy}
                 onSave={(team, done) => {
                   void commit((d) => {
@@ -829,18 +879,69 @@ export default function App() {
                 <div className="set-bar">
                   <span className="badge">
                     {scoring
-                      ? `SET ${currentSet!.setNumber}`
+                      ? periodLabel(
+                          sportOf(match),
+                          currentSet!.setNumber,
+                        ).toUpperCase()
                       : match.status === 'completed'
                         ? 'MATCH COMPLETE'
-                        : 'BETWEEN SETS'}
+                        : sportOf(match) === 'football'
+                          ? sets.length === 2
+                            ? 'HALFTIME'
+                            : 'BETWEEN QUARTERS'
+                          : 'BETWEEN SETS'}
                   </span>
                   <span>
-                    {busy ? 'Saving…' : '✓ Saved on device'} · Sets{' '}
-                    {result!.home}–{result!.away}
+                    {busy ? 'Saving…' : '✓ Saved on device'}
+                    {sportOf(match) === 'volleyball' && (
+                      <>
+                        {' '}
+                        · Sets {result!.home}–{result!.away}
+                      </>
+                    )}
                   </span>
                 </div>
               </div>
-              {scoring ? (
+              {sportOf(match) === 'football' ? (
+                <FootballScorer
+                  data={data}
+                  match={match}
+                  current={currentSet}
+                  periods={sets}
+                  busy={busy}
+                  onScore={(action, type) => {
+                    if (currentSet) {
+                      const at = Date.now();
+                      void commit((d) =>
+                        scoreAction(
+                          d,
+                          match.id,
+                          currentSet.id,
+                          action,
+                          at,
+                          type,
+                        ),
+                      );
+                    }
+                  }}
+                  onUndo={() => addPoint('UNDO')}
+                  onStart={() => {
+                    const at = Date.now();
+                    void commit((d) => startSet(d, match.id, at));
+                  }}
+                  onEnd={() =>
+                    currentSet &&
+                    setModal({
+                      kind: 'endSet',
+                      matchId: match.id,
+                      setId: currentSet.id,
+                    })
+                  }
+                  onComplete={() =>
+                    setModal({ kind: 'complete', matchId: match.id })
+                  }
+                />
+              ) : scoring ? (
                 <>
                   <div className="score-grid">
                     <button
@@ -955,29 +1056,36 @@ export default function App() {
                   {result!.tied > 0 && <p>{result!.tied} tied set(s)</p>}
                 </section>
               )}
-              {match.status !== 'completed' && (
-                <div className="sync-row">
-                  <button
-                    onClick={flashSync}
-                    disabled={busy || !!syncFlash || !currentSet}
-                  >
-                    ⊙ Video sync marker
-                  </button>
-                  <small>
-                    {currentSet
-                      ? 'Record this set, face the camera, then tap for the black–white–black flash.'
-                      : 'Start the next set before recording a sync marker.'}
-                  </small>
-                </div>
-              )}
+              {sportOf(match) === 'volleyball' &&
+                match.status !== 'completed' && (
+                  <div className="sync-row">
+                    <button
+                      onClick={flashSync}
+                      disabled={busy || !!syncFlash || !currentSet}
+                    >
+                      ⊙ Video sync marker
+                    </button>
+                    <small>
+                      {currentSet
+                        ? 'Record this set, face the camera, then tap for the black–white–black flash.'
+                        : 'Start the next set before recording a sync marker.'}
+                    </small>
+                  </div>
+                )}
               {sets.length > 0 && (
                 <section className="set-history">
-                  <h2>Set history</h2>
+                  <h2>
+                    {sportOf(match) === 'football'
+                      ? 'Quarter scores'
+                      : 'Set history'}
+                  </h2>
                   <div className="table-wrap">
                     <table>
                       <thead>
                         <tr>
-                          <th>Set</th>
+                          <th>
+                            {sportOf(match) === 'football' ? 'Quarter' : 'Set'}
+                          </th>
                           <th>{match.homeTeam}</th>
                           <th>{match.awayTeam}</th>
                           <th>Status</th>
@@ -988,7 +1096,11 @@ export default function App() {
                           const v = setScore(data, s.id);
                           return (
                             <tr key={s.id}>
-                              <th>{s.setNumber}</th>
+                              <th>
+                                {sportOf(match) === 'football'
+                                  ? periodLabel('football', s.setNumber)
+                                  : s.setNumber}
+                              </th>
                               <td>{v.homeScore}</td>
                               <td>{v.awayScore}</td>
                               <td>{s.completedAt ? 'Final' : 'Live'}</td>
@@ -1061,9 +1173,21 @@ export default function App() {
                           {dateLabel(e.timestamp)} · {timeLabel(e.timestamp)}
                         </time>
                         <span>
-                          {e.action.replaceAll('_', ' ').toLowerCase()}
+                          {e.scoringType
+                            ? `${e.action === 'HOME_POINT' ? 'Home' : 'Away'} ${footballScores[e.scoringType].label} +${footballScores[e.scoringType].points}`
+                            : e.action
+                                .replaceAll('_', ' ')
+                                .toLowerCase()
+                                .replace(
+                                  'set ',
+                                  sportOf(match) === 'football'
+                                    ? 'quarter '
+                                    : 'set ',
+                                )}
                           {e.syncNumber ? ` · Sync ${e.syncNumber}` : ''}
-                          {e.setNumber ? ` · Set ${e.setNumber}` : ''}
+                          {e.setNumber
+                            ? ` · ${periodLabel(sportOf(match), e.setNumber)}`
+                            : ''}
                         </span>
                         <strong>
                           {e.homeScore}–{e.awayScore}
@@ -1175,7 +1299,7 @@ export default function App() {
         </button>
       </section>
       <footer>
-        <span>VOLLEYBALL SCOREKEEPER</span>
+        <span>SCOREKEEPER</span>
         <span className="build-version" title={`Built ${__BUILD_TIME__}`}>
           v{__APP_VERSION__} · {__BUILD_REVISION__}
         </span>
@@ -1233,7 +1357,7 @@ export default function App() {
                       ? 'New match'
                       : 'New game'
                     : modal.kind === 'endSet'
-                      ? `End Set ${data.sets.find((s) => s.id === modal.setId)?.setNumber}?`
+                      ? `End ${periodLabel(sportOf(data.matches.find((m) => m.id === modal.matchId)), data.sets.find((s) => s.id === modal.setId)?.setNumber ?? 0)}?`
                       : modal.kind === 'complete'
                         ? 'Complete this match?'
                         : modal.kind === 'deleteMatch'
@@ -1314,6 +1438,9 @@ export default function App() {
             )}
             {modal.kind === 'newMatch' && (
               <MatchSetup
+                initialSport={
+                  sportFilter === 'football' ? 'football' : 'volleyball'
+                }
                 teams={data.teams}
                 defaultTeamId={
                   data.tournaments.find((t) => t.id === modal.tournamentId)
@@ -1341,13 +1468,17 @@ export default function App() {
                       {m.awayTeam}
                       <strong>{s.awayScore}</strong>
                     </p>
-                    <small>Once ended, this set is read-only.</small>
+                    <small>
+                      Once ended, this{' '}
+                      {sportOf(m) === 'football' ? 'quarter' : 'set'} is
+                      read-only.
+                    </small>
                   </div>
                 );
               })()}
             {modal.kind === 'complete' && (
               <p>
-                All set scores and events will be saved. Completed matches are
+                All scores and events will be saved. Completed matches are
                 read-only.
               </p>
             )}
@@ -1367,8 +1498,8 @@ export default function App() {
                       : 'Not started'}
                 </p>
                 <p>
-                  This permanently deletes the match, all its sets, points, undo
-                  history, and sync markers. This cannot be undone.
+                  This permanently deletes the match, all its scores, periods,
+                  undo history, and sync markers. This cannot be undone.
                 </p>
                 <p>
                   Saved teams
@@ -1438,7 +1569,13 @@ export default function App() {
                     );
                   }}
                 >
-                  {modal.kind === 'endSet' ? 'End set' : 'Complete match'}
+                  {modal.kind === 'endSet'
+                    ? sportOf(
+                        data.matches.find((m) => m.id === modal.matchId),
+                      ) === 'football'
+                      ? 'End quarter'
+                      : 'End set'
+                    : 'Complete match'}
                 </button>
               ) : (
                 <button

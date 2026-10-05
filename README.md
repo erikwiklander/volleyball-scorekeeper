@@ -1,6 +1,6 @@
-# Volleyball Scorekeeper
+# Scorekeeper
 
-A phone-first, offline volleyball scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. Scoring never depends on network access. Optional live sharing uses Firebase; spectators need no account.
+A phone-first, offline volleyball and Pop Warner tackle football scorekeeper. React + TypeScript + Vite, IndexedDB, and a precached PWA. Scoring never depends on network access. Optional live sharing uses Firebase; spectators need no account.
 
 ## Run locally
 
@@ -54,6 +54,14 @@ For tournaments, expand **Tournaments (optional)** on the home screen. Existing 
 Completed sets/matches are read-only for scoring. To remove a test or unwanted match, open it, expand **Match management**, choose **Delete match**, and confirm **Delete permanently**. This works for standalone games and tournament matches in any status. Deletion removes the match, its sets, and all its events together; saved teams, the tournament, and other matches remain. Ties and unusual scores are accepted. Set win totals are simple comparisons, not rule enforcement. New matches are initially `not_started`; MATCH_STARTED is recorded when the first set begins. Multiple unfinished matches are allowed; the most recently selected appears first in Resume.
 
 On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android, use the browser’s install action. Real-device installation, screen lock/relaunch, and wake-lock behavior should be smoke-tested on the target phones before tournament use.
+
+## Football
+
+Choose **Football · Pop Warner tackle** when creating a game. Home-screen sport filters also filter the team library; saved teams are separated by sport. Existing untagged games and teams remain volleyball. Tournaments may contain either sport.
+
+Start Quarter 1, then use each team's Touchdown (+6), Extra-point kick (+2), Run / pass conversion (+1), Field goal (+3), or Safety (+2) buttons. Undo reverses the whole latest score in the current quarter. End-quarter confirmation makes that quarter read-only. Quarter 2 ends at halftime; after Quarter 4, complete the game or start OT 1. Overtime periods can be repeated. Shortened games can also be completed between quarters. The scorer and public viewer show cumulative totals and a separate quarter breakdown. There is no game clock, down/distance or possession tracking in this version.
+
+Football uses the same offline storage, Google-authenticated publishing, public viewing, deletion and automatic reconnect behavior as volleyball. Football JSON backups use schema version 3 so older app versions reject them instead of treating touchdowns as single points. Volleyball backups remain version 2; versions 1 and 2 still import. Internal `sets` / `setNumber` references represent football quarters (5+ is overtime). Football event score snapshots are cumulative; CSV appends `sport`, `quarter_number`, `scoring_type`, and `points` columns while retaining existing columns. Football video sync markers are not exposed in the UI.
 
 ## Reliability and data
 

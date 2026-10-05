@@ -34,9 +34,10 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['icon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Volleyball Scorekeeper',
+        name: 'Scorekeeper',
         short_name: 'Scorekeeper',
-        description: 'Courtside scoring, saved on your device.',
+        description:
+          'Volleyball and Pop Warner football scoring, saved on your device.',
         theme_color: '#102d27',
         background_color: '#f6f5ef',
         display: 'standalone',

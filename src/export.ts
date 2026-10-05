@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { actions, id, orderedEvents, type Snapshot } from './domain';
+import {
+  actions,
+  footballScores,
+  sportOf,
+  id,
+  orderedEvents,
+  type Snapshot,
+} from './domain';
 const text = z.string().min(1);
 const time = z.iso.datetime();
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -8,7 +15,9 @@ const logo = z
   .string()
   .max(1_500_000)
   .regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/);
+const sport = z.enum(['volleyball', 'football']).optional();
 const teamSchema = z.object({
+  sport,
   id: text,
   name: text,
   shortName: z.string().optional(),
@@ -38,6 +47,7 @@ const tournamentSchema = z.object({
   updatedAt: time,
 });
 const matchSchema = z.object({
+  sport,
   id: text,
   tournamentId: text.optional(),
   home: appearanceSchema.optional(),
@@ -75,6 +85,9 @@ const eventSchema = z.object({
   epochMs: z.number().int(),
   sequence: z.number().int().positive(),
   action: z.enum(actions),
+  scoringType: z
+    .enum(['touchdown', 'kick', 'conversion', 'fieldGoal', 'safety'])
+    .optional(),
   homeScore: z.number().int().nonnegative(),
   awayScore: z.number().int().nonnegative(),
   targetEventId: text.optional(),
@@ -82,7 +95,7 @@ const eventSchema = z.object({
   syncNumber: z.number().int().positive().optional(),
 });
 const backupSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   teams: z.array(teamSchema).default([]),
   tournament: tournamentSchema.optional(),
   matches: z.array(matchSchema),
@@ -106,7 +119,7 @@ export function tournamentBackup(data: Snapshot, tournamentId: string) {
   const matches = data.matches.filter((m) => m.tournamentId === tournamentId);
   const ids = new Set(matches.map((m) => m.id));
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: matches.some((m) => sportOf(m) === 'football') ? 3 : 2,
     exportedAt: new Date().toISOString(),
     tournament,
     teams: referencedTeams(data, matches, tournament.defaultTeamId),
@@ -120,7 +133,7 @@ export function gameBackup(data: Snapshot, matchId: string) {
   if (!match || match.tournamentId)
     throw new Error('Standalone game not found.');
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: sportOf(match) === 'football' ? 3 : 2,
     exportedAt: new Date().toISOString(),
     teams: referencedTeams(data, [match]),
     matches: [match],
@@ -167,7 +180,16 @@ export function importBackup(raw: unknown, data: Snapshot) {
       throw new Error('Invalid tournament reference.');
   for (const s of backup.sets)
     if (!matches.has(s.matchId)) throw new Error('Invalid match reference.');
+  if (
+    backup.schemaVersion < 3 &&
+    backup.matches.some((m) => sportOf(m) === 'football')
+  )
+    throw new Error('Football requires backup version 3.');
   for (const e of backup.events) {
+    const football = sportOf(matches.get(e.matchId)) === 'football';
+    const scoring = e.action === 'HOME_POINT' || e.action === 'AWAY_POINT';
+    if (scoring && football ? !e.scoringType : !!e.scoringType)
+      throw new Error('Invalid sport scoring event.');
     if (
       e.tournamentId !== backup.tournament?.id ||
       !matches.has(e.matchId) ||
@@ -282,6 +304,10 @@ export function matchCsv(data: Snapshot, matchId: string) {
     'away_short_name',
     'home_secondary_color',
     'away_secondary_color',
+    'sport',
+    'quarter_number',
+    'scoring_type',
+    'points',
   ];
   const escape = (value: unknown) =>
     `"${String(value ?? '').replaceAll('"', '""')}"`;
@@ -314,6 +340,14 @@ export function matchCsv(data: Snapshot, matchId: string) {
       match.away?.shortName,
       match.home?.secondaryColor,
       match.away?.secondaryColor,
+      sportOf(match),
+      sportOf(match) === 'football' ? e.setNumber : '',
+      e.scoringType ?? '',
+      e.scoringType
+        ? footballScores[e.scoringType].points
+        : ['HOME_POINT', 'AWAY_POINT'].includes(e.action)
+          ? 1
+          : '',
     ]
       .map(escape)
       .join(','),

@@ -1085,3 +1085,59 @@ dialog.sync-white {
 .live-dot.connected {
   background: #27783b;
 }
+
+.football-team {
+  border-radius: 16px;
+  padding: 20px 10px;
+  text-align: center;
+  background: var(--team-color, #143c68);
+  border-top: 5px solid currentColor;
+}
+.football-team h2 {
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+.football-team .score {
+  display: block;
+  font-size: clamp(3.5rem, 12vw, 6rem);
+}
+.football-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.football-buttons > div {
+  display: grid;
+  gap: 8px;
+}
+.football-buttons button {
+  min-height: 56px;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+.football-buttons strong {
+  white-space: nowrap;
+}
+.sport-filter button[aria-pressed='true'] {
+  background: #102d27;
+  color: white;
+}
+
+.football-team .score-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.football-scoring .score-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.football-team {
+  min-width: 0;
+  padding: 12px 8px;
+}
+.football-team h2 {
+  margin: 0 0 8px;
+}
