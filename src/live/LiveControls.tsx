@@ -71,7 +71,7 @@ export default function LiveControls({
   const ownsLink = signedIn && (!broadcast || user.uid === broadcast.ownerUid);
 
   const pending = !!broadcast && broadcast.revision > broadcast.syncedRevision;
-  const url = broadcast ? liveUrl(broadcast.publicId, match) : '';
+  const url = broadcast ? liveUrl(broadcast.publicId) : '';
   return (
     <section className="live-controls">
       <h2>Live score</h2>
@@ -183,13 +183,10 @@ export default function LiveControls({
                       if (navigator.share)
                         await navigator.share({
                           title: liveTitle(match),
-                          text: liveTitle(match),
                           url,
                         });
                       else {
-                        await navigator.clipboard.writeText(
-                          `${liveTitle(match)}\n${url}`,
-                        );
+                        await navigator.clipboard.writeText(url);
                         setCopied(true);
                       }
                     } catch (error) {

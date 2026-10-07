@@ -22,26 +22,13 @@ export function liveConfig(): LiveConfig | undefined {
 export function liveTitle(match: { homeTeam: string; awayTeam: string }) {
   return `${match.homeTeam} vs ${match.awayTeam} — Live score`;
 }
-function teamSlug(name: string) {
-  return (
-    name
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 80)
-      .replace(/-$/g, '') || 'team'
-  );
-}
-export function liveUrl(
-  publicId: string,
-  match: { homeTeam: string; awayTeam: string },
-) {
+export function liveUrl(publicId: string) {
   const url = new URL(
     import.meta.env.VITE_LIVE_BASE_URL || './',
     document.baseURI,
   );
-  url.hash = `/live/${publicId}/${teamSlug(match.homeTeam)}-vs-${teamSlug(match.awayTeam)}`;
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/live/${publicId}`;
+  url.hash = '';
+  url.search = '';
   return url.href;
 }

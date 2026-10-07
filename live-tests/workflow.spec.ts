@@ -38,7 +38,7 @@ test('public viewer follows points, offline recovery, final results, stop and de
     page.getByText('The latest saved score is published.'),
   ).toBeVisible();
   const url = await page.getByLabel('Live score link').inputValue();
-  expect(url).toMatch(/\/live\/[a-zA-Z0-9_-]+\/eagles-vs-falcons$/);
+  expect(url).toMatch(/\/live\/[a-zA-Z0-9_-]+$/);
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'share', {
       configurable: true,
@@ -56,7 +56,6 @@ test('public viewer follows points, offline recovery, final results, stop and de
     ),
   ).toEqual({
     title: 'Eagles vs Falcons — Live score',
-    text: 'Eagles vs Falcons — Live score',
     url,
   });
   await page.evaluate(() => {
@@ -78,10 +77,15 @@ test('public viewer follows points, offline recovery, final results, stop and de
     .click();
   expect(
     await page.evaluate(() => (window as unknown as { copied: string }).copied),
-  ).toBe(`Eagles vs Falcons — Live score\n${url}`);
+  ).toBe(url);
   const viewerContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });
+  const preview = await page.request.get(url);
+  expect(preview.status()).toBe(200);
+  expect(await preview.text()).toContain(
+    'property="og:title" content="Eagles vs Falcons — Live score"',
+  );
   const viewer = await viewerContext.newPage();
   try {
     await viewer.goto(url);
@@ -90,8 +94,14 @@ test('public viewer follows points, offline recovery, final results, stop and de
     ).toBeVisible();
     await expect(viewer).toHaveTitle('Eagles vs Falcons — Live score');
     const legacy = new URL(url);
-    const publicId = legacy.hash.match(/^#\/live\/([^/]+)/)![1];
+    const publicId = legacy.pathname.match(/\/live\/([^/]+)/)![1];
+    legacy.pathname = '/volleyball-scorekeeper/';
     legacy.hash = `/live/${publicId}`;
+    await viewer.goto(legacy.href);
+    await expect(
+      viewer.getByRole('heading', { name: 'Eagles vs Falcons' }),
+    ).toBeVisible();
+    legacy.hash = `/live/${publicId}/eagles-vs-falcons`;
     await viewer.goto(legacy.href);
     await expect(
       viewer.getByRole('heading', { name: 'Eagles vs Falcons' }),

@@ -11,8 +11,7 @@ export default defineConfig({
     ...devices['iPhone 13'],
   },
   webServer: {
-    command:
-      'node_modules/.bin/vite preview --host 127.0.0.1 --outDir dist-live --port 4174 --base /volleyball-scorekeeper/',
+    command: 'node scripts/preview-live.mjs',
     url: 'http://127.0.0.1:4174/volleyball-scorekeeper/',
   },
   projects: [

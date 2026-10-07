@@ -5,24 +5,17 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe('live sharing', () => {
-  it('uses the viewer host, safe team slugs, and the original public ID', () => {
+  it('uses a server-visible ID on the viewer host for preview requests', () => {
     vi.stubGlobal('document', { baseURI: 'https://scorer.example/app/' });
     vi.stubEnv('VITE_LIVE_BASE_URL', 'https://viewer.example/');
-    expect(
-      liveUrl('abc_123', {
-        homeTeam: 'Éagles / Blue',
-        awayTeam: 'Falcons & Red',
-      }),
-    ).toBe('https://viewer.example/#/live/abc_123/eagles-blue-vs-falcons-red');
+    expect(liveUrl('abc_123')).toBe('https://viewer.example/live/abc_123');
   });
-  it('preserves subfolder deployments and handles names without Latin characters', () => {
+  it('preserves subfolder deployments', () => {
     vi.stubGlobal('document', { baseURI: 'https://scorer.example/app/' });
     vi.stubEnv('VITE_LIVE_BASE_URL', '');
-    expect(liveUrl('abc', { homeTeam: '東京', awayTeam: 'Falcons' })).toBe(
-      'https://scorer.example/app/#/live/abc/team-vs-falcons',
-    );
+    expect(liveUrl('abc')).toBe('https://scorer.example/app/live/abc');
   });
-  it('keeps full team names in the shared title for either sport', () => {
+  it('keeps team names in the shared title for either sport', () => {
     expect(liveTitle({ homeTeam: 'Eagles', awayTeam: 'Falcons' })).toBe(
       'Eagles vs Falcons — Live score',
     );

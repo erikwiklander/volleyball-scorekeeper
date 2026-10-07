@@ -58,6 +58,7 @@ export default defineConfig({
         clientsClaim: false,
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/live\//],
       },
     }),
   ],

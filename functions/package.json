@@ -1,0 +1,15 @@
+{
+  "name": "scorekeeper-live-preview",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test preview.test.js"
+  },
+  "dependencies": {
+    "firebase-functions": "^7.4.0"
+  }
+}

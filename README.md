@@ -107,7 +107,7 @@ Matches and events may omit `tournamentId`. No placeholder tournament is created
 
 ### Live score sharing
 
-Open a match, **Sign in with Google**, choose **Start live sharing**, then **Share live score**. Anyone with the link can follow the score without signing in. Shared messages and copied links include both team names, and the URL ends with a readable team-name suffix (for example, `#/live/<id>/eagles-vs-falcons`). Existing links without the suffix still work. Messaging apps may show the generic Scorekeeper preview card; match-specific preview hosting is not used, so the project can stay on the free Spark plan. The page shows team colors/logos, the current score, set history, final results, and when the latest score arrived. After 90 seconds without an update it says **Waiting for updates**; this is not a claim that the scorer is disconnected. Viewers reconnect automatically.
+Open a match, **Sign in with Google**, choose **Start live sharing**, then **Share live score**. Anyone with the link can follow the score without signing in. Shared and copied messages contain just the live URL. New `/live/<id>` links serve team-specific preview titles, such as “Eagles vs Falcons — Live score,” before JavaScript loads. Previously shared `#/live/<id>` links, including team-name suffixes, still work; their existing preview cards may remain generic. The page shows team colors/logos, the current score, set history, final results, and when the latest score arrived. After 90 seconds without an update it says **Waiting for updates**; this is not a claim that the scorer is disconnected. Viewers reconnect automatically.
 
 Scoring and the latest pending broadcast snapshot are committed in the same IndexedDB transaction. Uploads run separately, retry on reconnect, and coalesce offline changes. Server-enforced increasing revisions prevent delayed uploads or another tab from replacing a newer score. Sharing requires an initial connection; subsequent scoring works offline. Keep or reopen the scorer app while connected to send pending updates—iOS does not guarantee background uploads.
 
@@ -119,7 +119,12 @@ Deployment uses project `ew-volleyball-scorekeeper`. The scorer stays on GitHub 
 npx firebase login --no-localhost
 npm run test:live
 npm run build
-npx firebase deploy --only database,hosting
+npm install --prefix functions
+npx firebase deploy --only functions:live-preview,hosting,database
 ```
 
 Live tests require Java 21+ for Firebase's local emulator, plus installed Chromium and WebKit. On macOS, `brew install openjdk@21` is sufficient; the test runner detects Homebrew's installation without changing your shell's Java default. The suite builds into `dist-live` using a demo project and never uses production Firebase. It verifies access rules, public viewing, offline points/undo/reload, set results, stopping, and deletion. CI runs these tests before deploying. Firebase Hosting and database rules are deployed separately with the signed-in Firebase CLI.
+
+The preview service requires Blaze billing. It uses one maximum instance, no minimum instances, a fractional CPU, a 10-second timeout, 60-second CDN/metadata caching, and at most 60 uncached match lookups per minute per instance. It reads only the published flag and team names, avoiding embedded logos. These controls reduce costs but are not a total spending cap; spectator database and Hosting usage are billed separately. Configure a service spend cap and project-wide budget alerts in Firebase. Spend-cap enforcement can be delayed and does not cover Hosting or Realtime Database. Preview names can remain cached for up to a minute after an edit or withdrawal; messaging apps can keep their own cached cards longer. Actual live scores and withdrawals use the existing real-time subscription.
+
+Run `npm run build` before deploying functions and Hosting together: the deployment prehook packages the current built viewer entrypoint, whose assets stay on Hosting. For other projects, configure `LIVE_DATABASE_URL` and `LIVE_VIEWER_ORIGIN` in `functions/.env.<project-id>`.
