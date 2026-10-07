@@ -1,6 +1,6 @@
 import { periodLabel, sportOf } from '../domain';
 import { useEffect, useState } from 'react';
-import { liveConfig } from './config';
+import { liveConfig, liveTitle } from './config';
 import { publicBroadcastSchema, type PublicBroadcast } from './model';
 export default function LiveScorePage({ publicId }: { publicId: string }) {
   const [broadcast, setBroadcast] = useState<PublicBroadcast>();
@@ -69,6 +69,15 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
     };
   }, [publicId]);
   const match = broadcast?.published ? broadcast.match : undefined;
+  useEffect(() => {
+    const previous = document.title;
+    document.title = match
+      ? liveTitle({ homeTeam: match.home.name, awayTeam: match.away.name })
+      : 'Live score — Scorekeeper';
+    return () => {
+      document.title = previous;
+    };
+  }, [match?.home.name, match?.away.name]);
   const sets = Object.values(match?.sets ?? {}).sort(
     (a, b) => a.setNumber - b.setNumber,
   );

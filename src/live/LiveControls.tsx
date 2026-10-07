@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { User } from 'firebase/auth';
 import type { Broadcast } from './model';
-import { liveConfig, liveUrl } from './config';
+import { liveConfig, liveTitle, liveUrl } from './config';
+import type { Match } from '../domain';
 import { getLiveStatus, subscribeLiveStatus } from './worker';
 export default function LiveControls({
   broadcast,
+  match,
   busy,
   online,
   onStart,
   onStop,
 }: {
   broadcast?: Broadcast;
+  match: Match;
   busy: boolean;
   online: boolean;
   onStart: (ownerUid: string) => void;
@@ -68,7 +71,7 @@ export default function LiveControls({
   const ownsLink = signedIn && (!broadcast || user.uid === broadcast.ownerUid);
 
   const pending = !!broadcast && broadcast.revision > broadcast.syncedRevision;
-  const url = broadcast ? liveUrl(broadcast.publicId) : '';
+  const url = broadcast ? liveUrl(broadcast.publicId, match) : '';
   return (
     <section className="live-controls">
       <h2>Live score</h2>
@@ -179,11 +182,14 @@ export default function LiveControls({
                     try {
                       if (navigator.share)
                         await navigator.share({
-                          title: 'Live volleyball score',
+                          title: liveTitle(match),
+                          text: liveTitle(match),
                           url,
                         });
                       else {
-                        await navigator.clipboard.writeText(url);
+                        await navigator.clipboard.writeText(
+                          `${liveTitle(match)}\n${url}`,
+                        );
                         setCopied(true);
                       }
                     } catch (error) {

@@ -8,6 +8,6 @@ export default function Root() {
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
-  const live = hash.match(/^#\/live\/([a-zA-Z0-9_-]{1,128})$/);
+  const live = hash.match(/^#\/live\/([a-zA-Z0-9_-]{1,128})(?:\/[^/]+)?$/);
   return live ? <LiveScorePage publicId={live[1]} /> : <App />;
 }

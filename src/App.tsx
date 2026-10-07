@@ -1207,6 +1207,7 @@ export default function App() {
               )}
               <LiveControls
                 key={match.id}
+                match={match}
                 broadcast={data.broadcasts.find((b) => b.id === match.id)}
                 busy={busy}
                 online={online}

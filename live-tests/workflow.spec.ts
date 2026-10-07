@@ -38,6 +38,47 @@ test('public viewer follows points, offline recovery, final results, stop and de
     page.getByText('The latest saved score is published.'),
   ).toBeVisible();
   const url = await page.getByLabel('Live score link').inputValue();
+  expect(url).toMatch(/\/live\/[a-zA-Z0-9_-]+\/eagles-vs-falcons$/);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (data: ShareData) => {
+        (window as unknown as { shared: ShareData }).shared = data;
+      },
+    });
+  });
+  await page
+    .getByRole('button', { name: 'Share live score', exact: true })
+    .click();
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { shared: ShareData }).shared,
+    ),
+  ).toEqual({
+    title: 'Eagles vs Falcons — Live score',
+    text: 'Eagles vs Falcons — Live score',
+    url,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as unknown as { copied: string }).copied = text;
+        },
+      },
+    });
+  });
+  await page
+    .getByRole('button', { name: 'Share live score', exact: true })
+    .click();
+  expect(
+    await page.evaluate(() => (window as unknown as { copied: string }).copied),
+  ).toBe(`Eagles vs Falcons — Live score\n${url}`);
   const viewerContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });
@@ -47,6 +88,15 @@ test('public viewer follows points, offline recovery, final results, stop and de
     await expect(
       viewer.getByRole('heading', { name: 'Eagles vs Falcons' }),
     ).toBeVisible();
+    await expect(viewer).toHaveTitle('Eagles vs Falcons — Live score');
+    const legacy = new URL(url);
+    const publicId = legacy.hash.match(/^#\/live\/([^/]+)/)![1];
+    legacy.hash = `/live/${publicId}`;
+    await viewer.goto(legacy.href);
+    await expect(
+      viewer.getByRole('heading', { name: 'Eagles vs Falcons' }),
+    ).toBeVisible();
+    await viewer.goto(url);
     await expect(
       viewer.getByText('STARTING SOON', { exact: true }),
     ).toBeVisible();
