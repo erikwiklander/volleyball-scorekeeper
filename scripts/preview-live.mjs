@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { preview } from 'vite';
 import { createPreviewHandler } from '../functions/preview.js';
+import { prepareMatchup } from '../functions/matchup.js';
 const base = '/volleyball-scorekeeper/';
 const handler = createPreviewHandler({
   shell: readFileSync('dist-live/index.html', 'utf8'),
@@ -11,11 +12,15 @@ const handler = createPreviewHandler({
     );
     if (!result.ok) throw new Error('Unavailable');
     const data = await result.json();
-    return {
+    return prepareMatchup({
       published: data?.published,
       home: data?.match?.home?.name,
       away: data?.match?.away?.name,
-    };
+      homeLogo: data?.match?.home?.logo,
+      awayLogo: data?.match?.away?.logo,
+      homeColor: data?.match?.home?.color,
+      awayColor: data?.match?.away?.color,
+    });
   },
 });
 const server = await preview({

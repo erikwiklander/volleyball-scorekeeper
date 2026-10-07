@@ -1,4 +1,4 @@
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return value.replace(
     /[&<>"']/g,
     (character) =>
@@ -11,13 +11,21 @@ function escapeHtml(value) {
       })[character],
   );
 }
-export function renderPreview(shell, metadata, pageUrl, origin) {
-  const valid =
+export function validMetadata(metadata) {
+  return (
     metadata?.published === true &&
     [metadata.home, metadata.away].every(
       (name) =>
         typeof name === 'string' && name.length > 0 && name.length <= 100,
-    );
+    )
+  );
+}
+export function renderPreview(shell, metadata, pageUrl, origin) {
+  const valid = validMetadata(metadata);
+  const imageUrl =
+    valid && Buffer.isBuffer(metadata.image)
+      ? `${pageUrl.split('?')[0]}/matchup.png?v=${metadata.imageVersion}`
+      : undefined;
   const title = valid
     ? `${metadata.home} vs ${metadata.away} — Live score`
     : 'Live score — Scorekeeper';
@@ -32,18 +40,26 @@ export function renderPreview(shell, metadata, pageUrl, origin) {
     <meta property="og:title" content="${escapeHtml(title)}" />
     <meta property="og:description" content="${escapeHtml(description)}" />
     <meta property="og:url" content="${escapeHtml(pageUrl)}" />
-    <meta property="og:image" content="${escapeHtml(origin)}/icon-512.png" />
-    <meta name="twitter:card" content="summary" />
+    ${
+      imageUrl
+        ? `<meta property="og:image" content="${escapeHtml(imageUrl)}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="${escapeHtml(metadata.home)} vs ${escapeHtml(metadata.away)}" />`
+        : ''
+    }
+    <meta name="twitter:card" content="${imageUrl ? 'summary_large_image' : 'summary'}" />
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(description)}" />
-    <meta name="twitter:image" content="${escapeHtml(origin)}/icon-512.png" />`;
+    ${imageUrl ? `<meta name="twitter:image" content="${escapeHtml(imageUrl)}" />` : ''}`;
   return shell
     .replace('<head>', '<head>\n    <base href="/" />')
     .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
     .replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/?>/, '')
     .replace('</head>', `${tags}\n</head>`);
 }
-// Bound database lookups as well as scaling. Cached names never include scores/logos.
+// Bound database lookups and cached team assets as well as scaling.
 export function cachedMetadata(
   read,
   { now = Date.now, ttl = 60_000, capacity = 256, lookupsPerMinute = 60 } = {},
@@ -82,8 +98,11 @@ export function createPreviewHandler({ readMetadata, shell, origin }) {
       response.status(405).send('Method not allowed');
       return;
     }
-    const path = new URL(request.originalUrl, origin).pathname;
-    const route = path.match(/^\/live\/([a-zA-Z0-9_-]{1,128})\/?$/);
+    const requested = new URL(request.originalUrl, origin);
+    const path = requested.pathname;
+    const route = path.match(
+      /^\/live\/([a-zA-Z0-9_-]{1,128})(?:\/(matchup\.png))?\/?$/,
+    );
     if (!route) {
       response.status(404).send('Live score link not found');
       return;
@@ -92,15 +111,29 @@ export function createPreviewHandler({ readMetadata, shell, origin }) {
     let status = 200;
     try {
       metadata = await readMetadata(route[1]);
-      // Only names are cached; live scores still come directly from Firebase.
+      // Team appearance is cached; live scores still come directly from Firebase.
       response.set('Cache-Control', 'public, max-age=0, s-maxage=60');
     } catch (error) {
       status = error.status === 429 ? 429 : 503;
       response.set('Retry-After', '60');
     }
+    if (route[2]) {
+      if (status !== 200) {
+        response.status(status).send('Preview image unavailable');
+        return;
+      }
+      if (!validMetadata(metadata) || !Buffer.isBuffer(metadata.image)) {
+        response.status(404).send('Matchup image unavailable');
+        return;
+      }
+      response.type('png').status(200).send(metadata.image);
+      return;
+    }
+    const suffix =
+      requested.searchParams.get('preview') === '2' ? '?preview=2' : '';
     response
       .type('html')
       .status(status)
-      .send(renderPreview(shell, metadata, origin + path, origin));
+      .send(renderPreview(shell, metadata, origin + path + suffix, origin));
   };
 }

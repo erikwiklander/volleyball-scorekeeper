@@ -29,6 +29,6 @@ export function liveUrl(publicId: string) {
   );
   url.pathname = `${url.pathname.replace(/\/$/, '')}/live/${publicId}`;
   url.hash = '';
-  url.search = '';
+  url.search = '?preview=2';
   return url.href;
 }

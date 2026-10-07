@@ -38,7 +38,7 @@ test('public viewer follows points, offline recovery, final results, stop and de
     page.getByText('The latest saved score is published.'),
   ).toBeVisible();
   const url = await page.getByLabel('Live score link').inputValue();
-  expect(url).toMatch(/\/live\/[a-zA-Z0-9_-]+$/);
+  expect(url).toMatch(/\/live\/[a-zA-Z0-9_-]+\?preview=2$/);
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'share', {
       configurable: true,

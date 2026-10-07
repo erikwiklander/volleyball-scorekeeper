@@ -8,12 +8,16 @@ describe('live sharing', () => {
   it('uses a server-visible ID on the viewer host for preview requests', () => {
     vi.stubGlobal('document', { baseURI: 'https://scorer.example/app/' });
     vi.stubEnv('VITE_LIVE_BASE_URL', 'https://viewer.example/');
-    expect(liveUrl('abc_123')).toBe('https://viewer.example/live/abc_123');
+    expect(liveUrl('abc_123')).toBe(
+      'https://viewer.example/live/abc_123?preview=2',
+    );
   });
   it('preserves subfolder deployments', () => {
     vi.stubGlobal('document', { baseURI: 'https://scorer.example/app/' });
     vi.stubEnv('VITE_LIVE_BASE_URL', '');
-    expect(liveUrl('abc')).toBe('https://scorer.example/app/live/abc');
+    expect(liveUrl('abc')).toBe(
+      'https://scorer.example/app/live/abc?preview=2',
+    );
   });
   it('keeps team names in the shared title for either sport', () => {
     expect(liveTitle({ homeTeam: 'Eagles', awayTeam: 'Falcons' })).toBe(
