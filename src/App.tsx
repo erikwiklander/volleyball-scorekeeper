@@ -31,6 +31,7 @@ import {
   activePoints,
   completeMatch,
   deleteMatch,
+  deleteTeam,
   emptySnapshot,
   endSet,
   id,
@@ -706,9 +707,16 @@ export default function App() {
                   (t) => sportFilter === 'all' || sportOf(t) === sportFilter,
                 )}
                 busy={busy}
-                onSave={(team, done) => {
+                onDelete={(teamId, done) => {
+                  void commit((d) => deleteTeam(d, teamId), done);
+                }}
+                onSave={(team, done, editing) => {
                   void commit((d) => {
                     const existing = d.teams.find((t) => t.id === team.id);
+                    if (editing && !existing)
+                      throw new Error(
+                        'This team has been deleted in another tab. Close this editor and add a new team if needed.',
+                      );
                     if (existing) Object.assign(existing, team);
                     else d.teams.push(team);
                   }, done);

@@ -409,3 +409,16 @@ export function deleteMatch(data: Snapshot, matchId: string) {
     };
   }
 }
+
+// Match appearances are snapshots, so library cleanup never changes a game.
+export function deleteTeam(data: Snapshot, teamId: string) {
+  if (!data.teams.some((team) => team.id === teamId))
+    throw new Error('This team has already been deleted.');
+  data.teams = data.teams.filter((team) => team.id !== teamId);
+  for (const tournament of data.tournaments) {
+    if (tournament.defaultTeamId !== teamId) continue;
+    delete tournament.defaultTeamId;
+    delete tournament.defaultTeamName;
+    delete tournament.defaultTeamShortName;
+  }
+}

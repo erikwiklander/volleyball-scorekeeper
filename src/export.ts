@@ -111,7 +111,28 @@ function referencedTeams(
     defaultTeamId,
     ...matches.flatMap((m) => [m.home?.teamId, m.away?.teamId]),
   ]);
-  return data.teams.filter((team) => ids.has(team.id));
+  const teams = data.teams.filter((team) => ids.has(team.id));
+  // A deleted library team may still be referenced by historical games.
+  // Include a backup-only team record so these backups remain self-contained.
+  for (const match of matches) {
+    for (const side of ['home', 'away'] as const) {
+      const appearance = match[side];
+      if (!appearance || teams.some((team) => team.id === appearance.teamId))
+        continue;
+      teams.push({
+        id: appearance.teamId,
+        sport: sportOf(match),
+        name: appearance.displayName,
+        shortName: appearance.shortName,
+        logo: appearance.logo,
+        primaryColor: appearance.color,
+        secondaryColor: appearance.secondaryColor,
+        createdAt: match.createdAt,
+        updatedAt: match.updatedAt,
+      });
+    }
+  }
+  return teams;
 }
 export function tournamentBackup(data: Snapshot, tournamentId: string) {
   const tournament = data.tournaments.find((t) => t.id === tournamentId);

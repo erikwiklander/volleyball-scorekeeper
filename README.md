@@ -55,6 +55,8 @@ Completed sets/matches are read-only for scoring. To remove a test or unwanted m
 
 On iPhone, open Safari’s Share menu and choose Add to Home Screen. On Android, use the browser’s install action. Real-device installation, screen lock/relaunch, and wake-lock behavior should be smoke-tested on the target phones before tournament use.
 
+To remove a saved team, open **Your teams → select team → Delete team** and confirm. This removes it from future team selections and clears tournament defaults that reference it. Existing games and public scoreboards keep their original appearance and scores. Game backups still include the team appearance; importing such a backup restores that team to the saved library.
+
 ## Football
 
 Choose **Football · Pop Warner tackle** when creating a game. Home-screen sport filters also filter the team library; saved teams are separated by sport. Existing untagged games and teams remain volleyball. Tournaments may contain either sport.

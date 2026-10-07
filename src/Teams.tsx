@@ -279,20 +279,24 @@ export function TeamLibrary({
   initialSport = 'volleyball',
   busy,
   onSave,
+  onDelete,
   error,
 }: {
   teams: Team[];
   initialSport?: Sport;
   error: string;
   busy: boolean;
-  onSave: (team: Team, done: () => void) => void;
+  onSave: (team: Team, done: () => void, editing: boolean) => void;
+  onDelete: (teamId: string, done: () => void) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState<Team>();
+  const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState<TeamDraft>(blank(HOME_COLOR));
   const [loading, setLoading] = useState(false);
   function open(team?: Team) {
     setEditing(team);
+    setDeleting(false);
     setDraft(
       team ? fromTeam(team) : { ...blank(HOME_COLOR), sport: initialSport },
     );
@@ -343,7 +347,7 @@ export function TeamLibrary({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (loading || busy || !draft.name.trim()) return;
+            if (loading || busy || deleting || !draft.name.trim()) return;
             const now = new Date().toISOString();
             onSave(
               {
@@ -358,50 +362,105 @@ export function TeamLibrary({
                 updatedAt: now,
               },
               () => dialog.current?.close(),
+              !!editing,
             );
           }}
         >
-          <h2>{editing ? 'Edit team' : 'Add team'}</h2>
-          <label>
-            Sport
-            <select
-              value={sportOf(draft)}
-              disabled={!!editing || busy || loading}
-              onChange={(e) =>
-                setDraft({ ...draft, sport: e.target.value as Sport })
-              }
-            >
-              <option value="volleyball">Volleyball</option>
-              <option value="football">Football</option>
-            </select>
-          </label>
-          {error && (
-            <p role="alert" className="error">
-              {error}
-            </p>
+          {deleting && editing ? (
+            <>
+              <h2>Delete {editing.name}?</h2>
+              <p>
+                Remove this team from your saved teams and future game
+                selections on this device. Existing games, scores, logos and
+                live scoreboards will stay as they are.
+              </p>
+              <p>
+                Any tournament using this team as its default will have that
+                default cleared. This cannot be undone.
+              </p>
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+              <div className="toolbar">
+                <button
+                  type="button"
+                  disabled={busy}
+                  autoFocus
+                  onClick={() => setDeleting(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() =>
+                    onDelete(editing.id, () => dialog.current?.close())
+                  }
+                >
+                  Delete permanently
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>{editing ? 'Edit team' : 'Add team'}</h2>
+              <label>
+                Sport
+                <select
+                  value={sportOf(draft)}
+                  disabled={!!editing || busy || loading}
+                  onChange={(e) =>
+                    setDraft({ ...draft, sport: e.target.value as Sport })
+                  }
+                >
+                  <option value="volleyball">Volleyball</option>
+                  <option value="football">Football</option>
+                </select>
+              </label>
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+              <TeamFields
+                key={editing?.id ?? 'new'}
+                label="Team"
+                draft={draft}
+                onChange={setDraft}
+                onLoading={setLoading}
+              />
+              <p className="muted">
+                Saved matches keep their original names, colors, and logos.
+              </p>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  disabled={busy || loading}
+                  onClick={() => dialog.current?.close()}
+                >
+                  Cancel
+                </button>
+                <button className="primary" disabled={busy || loading}>
+                  Save team
+                </button>
+              </div>
+              {editing && (
+                <div className="danger-zone">
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busy || loading}
+                    onClick={() => setDeleting(true)}
+                  >
+                    Delete team
+                  </button>
+                </div>
+              )}
+            </>
           )}
-          <TeamFields
-            key={editing?.id ?? 'new'}
-            label="Team"
-            draft={draft}
-            onChange={setDraft}
-            onLoading={setLoading}
-          />
-          <p className="muted">
-            Saved matches keep their original names, colors, and logos.
-          </p>
-          <div className="toolbar">
-            <button
-              type="button"
-              disabled={busy || loading}
-              onClick={() => dialog.current?.close()}
-            >
-              Cancel
-            </button>
-            <button className="primary" disabled={busy || loading}>
-              Save team
-            </button>
-          </div>
         </form>
       </dialog>
     </section>
