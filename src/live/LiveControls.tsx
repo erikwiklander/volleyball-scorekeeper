@@ -12,6 +12,7 @@ export default function LiveControls({
   online,
   onStart,
   onStop,
+  viewOnly = false,
 }: {
   broadcast?: Broadcast;
   match: Match;
@@ -19,6 +20,7 @@ export default function LiveControls({
   online: boolean;
   onStart: (ownerUid: string) => void;
   onStop: () => void;
+  viewOnly?: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
   const attempt = useRef(0);
@@ -168,13 +170,15 @@ export default function LiveControls({
           {broadcast?.enabled ? (
             <>
               <p>
-                {!ownsLink
-                  ? 'Live updates are paused. Sign in with the match owner’s Google account to publish changes.'
-                  : !online
-                    ? 'Offline — changes will upload when you reconnect.'
-                    : pending
-                      ? status || 'Saved here. Live update pending…'
-                      : 'The latest saved score is published.'}
+                {viewOnly
+                  ? 'Live sharing follows the active scoring device.'
+                  : !ownsLink
+                    ? 'Live updates are paused. Sign in with the match owner’s Google account to publish changes.'
+                    : !online
+                      ? 'Offline — changes will upload when you reconnect.'
+                      : pending
+                        ? status || 'Saved here. Live update pending…'
+                        : 'The latest saved score is published.'}
               </p>
               <div className="toolbar">
                 <button

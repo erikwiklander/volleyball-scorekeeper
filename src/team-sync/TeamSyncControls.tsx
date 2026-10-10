@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { User } from 'firebase/auth';
 import { liveConfig } from '../live/config';
 import { getTeamSyncStatus, subscribeTeamSync } from './worker';
+import { LibrarySyncSummary } from '../library-sync/Controls';
 
 export default function TeamSyncControls({
   online,
@@ -9,12 +10,16 @@ export default function TeamSyncControls({
   cached,
   conflict,
   onDismiss,
+  historyNotice,
+  onDismissHistory,
 }: {
   online: boolean;
   busy: boolean;
   cached: boolean;
   conflict?: string;
   onDismiss: () => void;
+  historyNotice?: string;
+  onDismissHistory: () => void;
 }) {
   const status = useSyncExternalStore(subscribeTeamSync, getTeamSyncStatus);
   const [api, setApi] = useState<typeof import('../live/firebase')>();
@@ -52,16 +57,20 @@ export default function TeamSyncControls({
     user.providerData.some((provider) => provider.providerId === 'google.com');
   return (
     <div className="team-sync-controls" aria-label="Team sync">
+      <h3>Cloud backup &amp; sync</h3>
       {signedIn ? (
         <>
-          <p>
-            Team library · {user.email || user.displayName || 'Google account'}
-          </p>
+          <p>Library · {user.email || user.displayName || 'Google account'}</p>
           <p role="status">
             {!online
               ? 'Teams are saved here. Sync resumes when connected.'
               : status.message}
           </p>
+          <LibrarySyncSummary
+            online={online}
+            notice={historyNotice}
+            onDismiss={onDismissHistory}
+          />
           <div className="toolbar">
             <button
               disabled={busy || connecting}
@@ -71,7 +80,7 @@ export default function TeamSyncControls({
                   .catch(() => setError('Could not sign out. Try again.'))
               }
             >
-              Sign out of team sync
+              Sign out of sync
             </button>
             {status.phase === 'error' && (
               <button
@@ -89,8 +98,8 @@ export default function TeamSyncControls({
         <>
           <p>
             {cached
-              ? 'Your previous account’s teams are cached on this device. Sign in with that account to resume syncing; another account has its own library.'
-              : 'Sign in to sync your saved teams, colors, and logos across devices. Existing teams on this device will be included. You can still use teams offline.'}
+              ? 'Your previous account’s library is cached on this device. Sign in with that account to resume syncing; another account has its own library.'
+              : 'Sign in to back up your teams, games, and tournaments across devices. Existing records on this device will be included. Scoring still works offline.'}
           </p>
           <button
             disabled={
@@ -120,11 +129,18 @@ export default function TeamSyncControls({
               }
             }}
           >
-            {connecting ? 'Connecting team sync…' : 'Sign in to sync teams'}
+            {connecting ? 'Connecting sync…' : 'Sign in to sync your library'}
           </button>
         </>
       )}
       {error && <p role="alert">{error}</p>}
+      {!signedIn && (
+        <LibrarySyncSummary
+          online={online}
+          notice={historyNotice}
+          onDismiss={onDismissHistory}
+        />
+      )}
       {conflict && (
         <p role="status">
           {conflict}{' '}

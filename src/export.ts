@@ -35,7 +35,7 @@ const appearanceSchema = z.object({
   secondaryColor: color.optional(),
   logo: logo.optional(),
 });
-const tournamentSchema = z.object({
+export const tournamentSchema = z.object({
   id: text,
   name: text,
   date: z.string().optional(),
@@ -46,7 +46,7 @@ const tournamentSchema = z.object({
   createdAt: time,
   updatedAt: time,
 });
-const matchSchema = z.object({
+export const matchSchema = z.object({
   sport,
   id: text,
   tournamentId: text.optional(),
@@ -68,14 +68,14 @@ const matchSchema = z.object({
   createdAt: time,
   updatedAt: time,
 });
-const setSchema = z.object({
+export const setSchema = z.object({
   id: text,
   matchId: text,
   setNumber: z.number().int().positive(),
   startedAt: time,
   completedAt: time.optional(),
 });
-const eventSchema = z.object({
+export const eventSchema = z.object({
   id: text,
   tournamentId: text.optional(),
   matchId: text,
@@ -94,6 +94,16 @@ const eventSchema = z.object({
   syncCue: z.literal('black-white-black-v1').optional(),
   syncNumber: z.number().int().positive().optional(),
 });
+function visibleRecord(
+  data: Snapshot,
+  kind: 'games' | 'tournaments',
+  recordId: string,
+) {
+  const link = data.libraryLinks.find(
+    (link) => link.kind === kind && link.recordId === recordId,
+  );
+  return !link || link.ownerUid === data.teamSync.ownerUid;
+}
 const backupSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   teams: z.array(teamSchema).default([]),
@@ -111,7 +121,14 @@ function referencedTeams(
     defaultTeamId,
     ...matches.flatMap((m) => [m.home?.teamId, m.away?.teamId]),
   ]);
-  const teams = data.teams.filter((team) => ids.has(team.id));
+  const teams = data.teams.filter(
+    (team) =>
+      ids.has(team.id) &&
+      !data.teamLinks.some(
+        (link) =>
+          link.id === team.id && link.ownerUid !== data.teamSync.ownerUid,
+      ),
+  );
   // A deleted library team may still be referenced by historical games.
   // Include a backup-only team record so these backups remain self-contained.
   for (const match of matches) {
@@ -136,8 +153,12 @@ function referencedTeams(
 }
 export function tournamentBackup(data: Snapshot, tournamentId: string) {
   const tournament = data.tournaments.find((t) => t.id === tournamentId);
-  if (!tournament) throw new Error('Tournament not found.');
-  const matches = data.matches.filter((m) => m.tournamentId === tournamentId);
+  if (!tournament || !visibleRecord(data, 'tournaments', tournamentId))
+    throw new Error('Tournament not found.');
+  const matches = data.matches.filter(
+    (m) =>
+      m.tournamentId === tournamentId && visibleRecord(data, 'games', m.id),
+  );
   const ids = new Set(matches.map((m) => m.id));
   return {
     schemaVersion: matches.some((m) => sportOf(m) === 'football') ? 3 : 2,
@@ -151,15 +172,29 @@ export function tournamentBackup(data: Snapshot, tournamentId: string) {
 }
 export function gameBackup(data: Snapshot, matchId: string) {
   const match = data.matches.find((m) => m.id === matchId);
-  if (!match || match.tournamentId)
+  const tournament =
+    match?.tournamentId &&
+    data.tournaments.some(
+      (t) =>
+        t.id === match.tournamentId && visibleRecord(data, 'tournaments', t.id),
+    );
+  if (!match || tournament || !visibleRecord(data, 'games', matchId))
     throw new Error('Standalone game not found.');
+  const standalone: Snapshot['matches'][number] = {
+    ...match,
+    tournamentId: undefined,
+  };
   return {
     schemaVersion: sportOf(match) === 'football' ? 3 : 2,
     exportedAt: new Date().toISOString(),
     teams: referencedTeams(data, [match]),
-    matches: [match],
+    matches: [standalone],
     sets: data.sets.filter((s) => s.matchId === matchId),
-    events: orderedEvents(data.events.filter((e) => e.matchId === matchId)),
+    events: orderedEvents(
+      data.events
+        .filter((e) => e.matchId === matchId)
+        .map((e) => ({ ...e, tournamentId: undefined })),
+    ),
   };
 }
 export function importBackup(raw: unknown, data: Snapshot) {
@@ -252,7 +287,8 @@ export function importBackup(raw: unknown, data: Snapshot) {
       throw new Error('Invalid match/set state.');
   }
   if (
-    new Set(backup.events.map((e) => e.sequence)).size !== backup.events.length
+    new Set(backup.events.map((e) => `${e.matchId}:${e.sequence}`)).size !==
+    backup.events.length
   )
     throw new Error('Duplicate event sequence.');
   const mapping = new Map(all.map((x) => [x.id, id()]));
@@ -298,7 +334,10 @@ export function importBackup(raw: unknown, data: Snapshot) {
 }
 export function matchCsv(data: Snapshot, matchId: string) {
   const match = data.matches.find((m) => m.id === matchId)!;
-  const tournament = data.tournaments.find((t) => t.id === match.tournamentId)!;
+  const tournament = data.tournaments.find(
+    (t) =>
+      t.id === match.tournamentId && visibleRecord(data, 'tournaments', t.id),
+  );
   const headers = [
     'tournament_id',
     'tournament_name',

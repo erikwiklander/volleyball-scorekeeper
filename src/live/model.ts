@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { matchResult, setScore, sportOf, type Snapshot } from '../domain';
 import { HOME_COLOR, AWAY_COLOR } from '../colors';
+import { libraryLink } from '../library-sync/model';
 
 const teamSchema = z.object({
   name: z.string().min(1).max(100),
@@ -56,6 +57,9 @@ export interface Broadcast {
   syncedRevision: number;
 }
 export interface SyncEntry {
+  gameId?: string;
+  scorerDeviceId?: string;
+  scorerEpoch?: number;
   id: string; // Public ID, one coalesced snapshot per broadcast.
   matchId: string;
   ownerUid: string;
@@ -106,6 +110,8 @@ export function publicMatch(data: Snapshot, matchId: string): PublicMatch {
 // Called in the same transaction as the scoring action. Cloud I/O never occurs here.
 export function queueBroadcastChanges(before: Snapshot, after: Snapshot) {
   for (const broadcast of after.broadcasts) {
+    const control = libraryLink(after, 'games', broadcast.id);
+    const oldControl = libraryLink(before, 'games', broadcast.id);
     const previous = before.broadcasts.find((b) => b.id === broadcast.id);
     if (!after.matches.some((m) => m.id === broadcast.id))
       broadcast.enabled = false;
@@ -116,10 +122,16 @@ export function queueBroadcastChanges(before: Snapshot, after: Snapshot) {
         : null;
     if (
       !previous ||
+      previous.revision !== broadcast.revision ||
+      control?.scorerEpoch !== oldControl?.scorerEpoch ||
+      !!control !== !!oldControl ||
       previous.enabled !== broadcast.enabled ||
       JSON.stringify(old) !== JSON.stringify(current)
     ) {
-      broadcast.revision = (previous?.revision ?? 0) + 1;
+      broadcast.revision = Math.max(
+        broadcast.revision,
+        (previous?.revision ?? 0) + 1,
+      );
       after.syncQueue = after.syncQueue.filter(
         (entry) => entry.id !== broadcast.publicId,
       );
@@ -129,6 +141,13 @@ export function queueBroadcastChanges(before: Snapshot, after: Snapshot) {
         ownerUid: broadcast.ownerUid,
         revision: broadcast.revision,
         match: current,
+        ...(control
+          ? {
+              gameId: broadcast.id,
+              scorerDeviceId: control.scorerDeviceId,
+              scorerEpoch: control.scorerEpoch,
+            }
+          : {}),
       });
     }
   }

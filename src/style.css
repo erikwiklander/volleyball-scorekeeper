@@ -1205,3 +1205,16 @@ dialog.sync-white {
 .team-sync-controls .toolbar {
   margin-bottom: 0;
 }
+.scorer-controls {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.game-sync-controls {
+  margin: 1rem 0;
+}
+.game-sync-controls small {
+  display: block;
+  margin-top: 0.5rem;
+}

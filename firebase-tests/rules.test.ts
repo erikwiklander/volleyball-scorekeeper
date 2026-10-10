@@ -21,6 +21,163 @@ beforeAll(async () => {
 beforeEach(async () => env.clearDatabase());
 afterAll(async () => env?.cleanup());
 const team = { name: 'Eagles', shortName: '', color: '#008000', logo: '' };
+const privateDb = (uid = 'owner', provider = 'google.com') =>
+  env
+    .authenticatedContext(uid, {
+      firebase: { sign_in_provider: provider, identities: {} },
+    })
+    .database();
+it('full games and tournaments are account-private and scorer epochs fence stale private and live writes', async () => {
+  const gameId = crypto.randomUUID(),
+    deviceA = crypto.randomUUID(),
+    deviceB = crypto.randomUUID();
+  const gamePath = `users/owner/games/${gameId}`;
+  const gameRef = ref(privateDb(), gamePath);
+  const initial = {
+    schemaVersion: 1,
+    revision: 1,
+    mutationId: crypto.randomUUID(),
+    deviceId: deviceA,
+    scorerDeviceId: deviceA,
+    scorerEpoch: 1,
+    deleted: false,
+    updatedAt: serverTimestamp(),
+    payload: JSON.stringify({ privateHistory: true }),
+  };
+  await assertSucceeds(set(gameRef, initial));
+  await assertSucceeds(get(ref(privateDb(), 'users/owner/games')));
+  for (const db of [
+    env.unauthenticatedContext().database(),
+    privateDb('other'),
+    privateDb('owner', 'anonymous'),
+  ]) {
+    await assertFails(get(ref(db, gamePath)));
+    await assertFails(get(ref(db, 'users/owner/games')));
+    await assertFails(
+      set(ref(db, gamePath), {
+        ...initial,
+        revision: 2,
+        mutationId: crypto.randomUUID(),
+      }),
+    );
+  }
+  await assertFails(
+    set(ref(privateDb(), gamePath + '/payload'), 'nested bypass'),
+  );
+  await assertFails(set(gameRef, null));
+  await assertFails(
+    set(gameRef, { ...initial, revision: 3, mutationId: crypto.randomUUID() }),
+  );
+  await assertFails(
+    set(gameRef, {
+      ...initial,
+      revision: 2,
+      mutationId: crypto.randomUUID(),
+      scorerEpoch: 2,
+      deviceId: deviceB,
+      scorerDeviceId: deviceB,
+      payload: 'overwrite on takeover',
+    }),
+  );
+  const publicA = {
+    ...payload(),
+    gameId,
+    scorerDeviceId: deviceA,
+    scorerEpoch: 1,
+  };
+  await assertSucceeds(set(owner(), publicA));
+  const takeover = {
+    ...initial,
+    revision: 2,
+    mutationId: crypto.randomUUID(),
+    scorerEpoch: 2,
+    deviceId: deviceB,
+    scorerDeviceId: deviceB,
+  };
+  await assertSucceeds(set(gameRef, takeover));
+  await assertFails(
+    set(gameRef, { ...initial, revision: 3, mutationId: crypto.randomUUID() }),
+  );
+  await assertFails(set(owner(), { ...publicA, revision: 2 }));
+  await assertFails(set(owner(), payload(2))); // Old clients cannot remove the game's control binding.
+  await assertSucceeds(
+    set(owner(), {
+      ...publicA,
+      revision: 2,
+      scorerEpoch: 2,
+      scorerDeviceId: deviceB,
+    }),
+  );
+  expect((await assertSucceeds(get(visitor()))).val().match.home.name).toBe(
+    'Eagles',
+  );
+  const deleted = {
+    ...takeover,
+    revision: 3,
+    mutationId: crypto.randomUUID(),
+    deleted: true,
+    payload: null,
+  };
+  await assertSucceeds(set(gameRef, deleted));
+  await assertFails(
+    set(owner(), {
+      ...publicA,
+      revision: 3,
+      scorerEpoch: 2,
+      scorerDeviceId: deviceB,
+    }),
+  );
+  await assertSucceeds(
+    set(owner(), {
+      ...publicA,
+      revision: 3,
+      scorerEpoch: 2,
+      scorerDeviceId: deviceB,
+      published: false,
+      match: null,
+    }),
+  );
+  await assertFails(
+    set(gameRef, { ...takeover, revision: 4, mutationId: crypto.randomUUID() }),
+  );
+  const tournamentRef = ref(
+    privateDb(),
+    `users/owner/tournaments/${crypto.randomUUID()}`,
+  );
+  const tournament = {
+    schemaVersion: 1,
+    revision: 1,
+    mutationId: crypto.randomUUID(),
+    deviceId: deviceA,
+    deleted: false,
+    updatedAt: serverTimestamp(),
+    payload: '{"name":"Cup"}',
+  };
+  await assertSucceeds(set(tournamentRef, tournament));
+  await assertFails(
+    get(
+      ref(env.unauthenticatedContext().database(), 'users/owner/tournaments'),
+    ),
+  );
+  await assertFails(get(ref(privateDb('other'), 'users/owner/tournaments')));
+  await assertFails(
+    set(tournamentRef, {
+      ...tournament,
+      revision: 2,
+      mutationId: crypto.randomUUID(),
+      extra: true,
+    }),
+  );
+  await assertSucceeds(
+    set(tournamentRef, {
+      ...tournament,
+      revision: 2,
+      mutationId: crypto.randomUUID(),
+      deleted: true,
+      payload: null,
+    }),
+  );
+});
 it('team libraries are private to their Google account and validate revisions and deletion tombstones', async () => {
   const teamId = crypto.randomUUID();
   const path = `users/owner/teams/${teamId}`;

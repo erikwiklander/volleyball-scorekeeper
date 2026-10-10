@@ -4,7 +4,7 @@ test.use({ actionTimeout: 15_000 });
 
 async function signIn(page: Page, email: string, existing = false) {
   const button = page.getByRole('button', {
-    name: 'Sign in to sync teams',
+    name: 'Sign in to sync your library',
     exact: true,
   });
   await expect(button).toBeEnabled();
@@ -20,7 +20,7 @@ async function signIn(page: Page, email: string, existing = false) {
     await popup.locator('form button[type=submit]').click();
   }
   await expect(
-    page.getByText(`Team library · ${email}`, { exact: true }),
+    page.getByText(`Library · ${email}`, { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText('Teams are synced.', { exact: true }),
@@ -153,7 +153,7 @@ test('teams migrate, sync between devices, survive offline reload, propagate del
     await context.setOffline(false);
     await expect(teamCard(page, 'Cloud Football')).toHaveCount(0);
     await second
-      .getByRole('button', { name: 'Sign out of team sync', exact: true })
+      .getByRole('button', { name: 'Sign out of sync', exact: true })
       .click();
     await signIn(second, `other-${email}`);
     await expect(second.locator('.team-list .list-card')).toHaveCount(0);
@@ -163,7 +163,7 @@ test('teams migrate, sync between devices, survive offline reload, propagate del
     ).toBeVisible();
     await expect(teamCard(page, 'Other account team')).toHaveCount(0);
     await second
-      .getByRole('button', { name: 'Sign out of team sync', exact: true })
+      .getByRole('button', { name: 'Sign out of sync', exact: true })
       .click();
     await signIn(second, email, true);
     await expect(teamCard(second, 'Cloud latest Eagles')).toBeVisible();

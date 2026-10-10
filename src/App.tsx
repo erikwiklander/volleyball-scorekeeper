@@ -11,6 +11,15 @@ import SiteAnalytics from './live/SiteAnalytics';
 import TeamSyncControls from './team-sync/TeamSyncControls';
 import { teamLibrary } from './team-sync/model';
 import { startTeamWorker } from './team-sync/worker';
+import { startLibraryWorker } from './library-sync/worker';
+import { GameSyncControls } from './library-sync/Controls';
+import {
+  inLibrary,
+  canScoreGame,
+  libraryLink,
+  applyLibraryRecord,
+  queueCurrentLive,
+} from './library-sync/model';
 import { startLiveWorker } from './live/worker';
 import {
   applyUpdate,
@@ -142,6 +151,8 @@ export default function App() {
   const db = useRef<IDBPDatabase>(undefined);
   const liveWorker = useRef<ReturnType<typeof startLiveWorker>>(undefined);
   const teamWorker = useRef<ReturnType<typeof startTeamWorker>>(undefined);
+  const libraryWorker =
+    useRef<ReturnType<typeof startLibraryWorker>>(undefined);
   const channel = useRef<BroadcastChannel>(undefined);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -162,6 +173,7 @@ export default function App() {
         setReady(true);
         liveWorker.current = startLiveWorker(connection);
         teamWorker.current = startTeamWorker(connection);
+        libraryWorker.current = startLibraryWorker(connection);
       })
       .catch(() =>
         setError(
@@ -200,6 +212,7 @@ export default function App() {
       );
     window.addEventListener('live-sync', refresh);
     window.addEventListener('team-sync', refresh);
+    window.addEventListener('library-sync', refresh);
     window.addEventListener('storage-upgrade-blocked', storageBlocked);
     window.addEventListener('storage-upgrade-required', storageRequired);
     window.addEventListener('offline-ready', available);
@@ -214,10 +227,12 @@ export default function App() {
       alive = false;
       liveWorker.current?.stop();
       teamWorker.current?.stop();
+      libraryWorker.current?.stop();
       db.current?.close();
       channel.current?.close();
       window.removeEventListener('live-sync', refresh);
       window.removeEventListener('team-sync', refresh);
+      window.removeEventListener('library-sync', refresh);
       window.removeEventListener('storage-upgrade-blocked', storageBlocked);
       window.removeEventListener('storage-upgrade-required', storageRequired);
       window.removeEventListener('offline-ready', available);
@@ -233,11 +248,14 @@ export default function App() {
   }, [modal]);
   const match =
     page.kind === 'match'
-      ? data.matches.find((m) => m.id === page.id)
+      ? data.matches.find(
+          (m) => m.id === page.id && inLibrary(data, 'games', m.id),
+        )
       : undefined;
   const tournament = data.tournaments.find(
     (t) =>
-      t.id === (page.kind === 'tournament' ? page.id : match?.tournamentId),
+      t.id === (page.kind === 'tournament' ? page.id : match?.tournamentId) &&
+      inLibrary(data, 'tournaments', t.id),
   );
   const sets = data.sets
     .filter((s) => s.matchId === match?.id)
@@ -288,6 +306,7 @@ export default function App() {
       channel.current?.postMessage('changed');
       void liveWorker.current?.wake();
       if (next.teamQueue.length) void teamWorker.current?.wake();
+      if (next.libraryQueue.length) void libraryWorker.current?.wake();
       after?.();
     } catch (err) {
       setSyncFlash(undefined);
@@ -304,8 +323,76 @@ export default function App() {
     setShowEvents(false);
     setNotice('');
   }
+  async function takeOverScoring() {
+    if (!match || !db.current || saving.current) return;
+    saving.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      if (!navigator.onLine)
+        throw new Error('Connect before taking over scoring.');
+      const state = await readSnapshot(db.current);
+      const link = libraryLink(state, 'games', match.id);
+      if (!link || !inLibrary(state, 'games', match.id))
+        throw new Error('Reopen this game before taking over.');
+      const api = await import('./live/firebase');
+      const remote = await new Promise<
+        Awaited<ReturnType<typeof api.takeOverGame>>
+      >((resolve, reject) => {
+        const timer = window.setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Takeover is taking too long. Reconnect and check this game’s latest state.',
+              ),
+            ),
+          20_000,
+        );
+        api
+          .takeOverGame(
+            link.ownerUid,
+            match.id,
+            state.teamSync.deviceId,
+            link.revision,
+          )
+          .then(resolve, reject)
+          .finally(() => window.clearTimeout(timer));
+      });
+      await mutate(
+        db.current,
+        (d) => {
+          if (d.teamSync.ownerUid !== link.ownerUid)
+            throw new Error(
+              'The account changed. Sign in with the game owner.',
+            );
+          applyLibraryRecord(d, 'games', match.id, link.ownerUid, remote);
+        },
+        { queueLibrary: false, queueLive: false, queueTeams: false },
+      );
+      const next = await mutate(db.current, (d) =>
+        queueCurrentLive(d, match.id),
+      );
+      setData(next);
+      channel.current?.postMessage('changed');
+      void libraryWorker.current?.wake();
+      void liveWorker.current?.wake();
+      setNotice('This device now controls the game. You can continue scoring.');
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not take over scoring. Try again when connected.',
+      );
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  }
   function openMatch(matchId: string) {
-    const m = data.matches.find((item) => item.id === matchId)!;
+    const m = data.matches.find(
+      (item) => item.id === matchId && inLibrary(data, 'games', item.id),
+    );
+    if (!m) return;
     if (m.status === 'completed') {
       navigate({ kind: 'match', id: matchId });
       return;
@@ -314,6 +401,8 @@ export default function App() {
       (d) => {
         const latest = d.matches.find((item) => item.id === matchId);
         if (!latest) throw new Error('Match no longer exists.');
+        if (!inLibrary(d, 'games', matchId))
+          throw new Error('The account changed. Reopen this game.');
         d.appState = {
           id: 'current',
           activeTournamentId: latest.tournamentId,
@@ -443,6 +532,13 @@ export default function App() {
       void commit(
         (d) => {
           const existing = d.tournaments.find((t) => t.id === tournamentId);
+          if (
+            modal.tournament &&
+            (!existing || !inLibrary(d, 'tournaments', tournamentId))
+          )
+            throw new Error(
+              'This tournament is no longer available in your account.',
+            );
           const record: Tournament = {
             id: tournamentId,
             name: value('name'),
@@ -473,6 +569,8 @@ export default function App() {
         (d) => {
           if (tournamentId && !d.tournaments.some((t) => t.id === tournamentId))
             throw new Error('Tournament no longer exists.');
+          if (tournamentId && !inLibrary(d, 'tournaments', tournamentId))
+            throw new Error('The account changed. Reopen this tournament.');
           const home = saveAppearance(d, homeDraft, now);
           const away = saveAppearance(d, awayDraft, now);
           d.matches.push({
@@ -545,10 +643,21 @@ export default function App() {
   const acceptsSport = (m: Match) =>
     sportFilter === 'all' || sportOf(m) === sportFilter;
   const libraryTeams = teamLibrary(data);
-  const standaloneGames = data.matches
-    .filter((m) => !m.tournamentId && acceptsSport(m))
+  const libraryMatches = data.matches.filter((m) =>
+    inLibrary(data, 'games', m.id),
+  );
+  const libraryTournaments = data.tournaments.filter((t) =>
+    inLibrary(data, 'tournaments', t.id),
+  );
+  const standaloneGames = libraryMatches
+    .filter(
+      (m) =>
+        (!m.tournamentId ||
+          !libraryTournaments.some((t) => t.id === m.tournamentId)) &&
+        acceptsSport(m),
+    )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const unfinished = data.matches
+  const unfinished = libraryMatches
     .filter((m) => m.status !== 'completed' && acceptsSport(m))
     .sort(
       (a, b) =>
@@ -721,21 +830,25 @@ export default function App() {
                   </div>
                 )}
               </section>
+              <TeamSyncControls
+                online={online}
+                busy={busy}
+                cached={!!data.teamSync.ownerUid}
+                conflict={data.teamSync.conflict}
+                historyNotice={data.teamSync.libraryNotice}
+                onDismissHistory={() =>
+                  void commit((d) => {
+                    delete d.teamSync.libraryNotice;
+                  })
+                }
+                onDismiss={() =>
+                  void commit((draft) => {
+                    delete draft.teamSync.conflict;
+                  })
+                }
+              />
               <SiteAnalytics />
               <TeamLibrary
-                syncControls={
-                  <TeamSyncControls
-                    online={online}
-                    busy={busy}
-                    cached={!!data.teamSync.ownerUid}
-                    conflict={data.teamSync.conflict}
-                    onDismiss={() =>
-                      void commit((draft) => {
-                        delete draft.teamSync.conflict;
-                      })
-                    }
-                  />
-                }
                 initialSport={
                   sportFilter === 'football' ? 'football' : 'volleyball'
                 }
@@ -774,14 +887,14 @@ export default function App() {
               />
               <details className="optional-tournaments">
                 <summary>
-                  Tournaments (optional) · {data.tournaments.length}
+                  Tournaments (optional) · {libraryTournaments.length}
                 </summary>
                 <p>Group several games together when you need to.</p>
                 <button onClick={() => setModal({ kind: 'tournament' })}>
                   + New tournament
                 </button>
                 <div className="tournaments">
-                  {[...data.tournaments]
+                  {[...libraryTournaments]
                     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
                     .map((t) => (
                       <button
@@ -798,7 +911,7 @@ export default function App() {
                         <div className="card-bottom">
                           <span>
                             {
-                              data.matches.filter(
+                              libraryMatches.filter(
                                 (m) => m.tournamentId === t.id,
                               ).length
                             }{' '}
@@ -824,7 +937,9 @@ export default function App() {
                     }}
                   />
                 </label>
-                <span>Stored on this device. Export to keep a backup.</span>
+                <span>
+                  Sign in for cloud backup. Exports keep an extra copy.
+                </span>
               </div>
               <details className="help">
                 <summary>Install & use offline</summary>
@@ -834,9 +949,10 @@ export default function App() {
                   “Offline ready” before leaving your connection.
                 </p>
                 <p>
-                  Use the same browser or installed app to access your matches.
-                  Clearing site data or browser storage removes local records.
-                  Export game or tournament backups regularly. Timestamps use
+                  Sign in with the same Google account to access your library on
+                  other devices. Clearing browser storage removes local records,
+                  including changes that have not synced. Check that cloud
+                  backup has finished, or export an extra copy. Timestamps use
                   your device’s clock; check it before recording.
                 </p>
               </details>
@@ -884,12 +1000,14 @@ export default function App() {
                 </button>
               </div>
               <div className="match-list">
-                {data.matches
+                {libraryMatches
                   .filter((m) => m.tournamentId === tournament.id)
                   .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
                   .map(matchCard)}
               </div>
-              {!data.matches.some((m) => m.tournamentId === tournament.id) && (
+              {!libraryMatches.some(
+                (m) => m.tournamentId === tournament.id,
+              ) && (
                 <div className="empty">
                   <h3>Ready for the first whistle.</h3>
                   <p>Add a match, then start Set 1 when play begins.</p>
@@ -915,8 +1033,8 @@ export default function App() {
                 className="back"
                 onClick={() =>
                   navigate(
-                    match.tournamentId
-                      ? { kind: 'tournament', id: match.tournamentId }
+                    tournament
+                      ? { kind: 'tournament', id: tournament.id }
                       : { kind: 'home' },
                   )
                 }
@@ -960,176 +1078,191 @@ export default function App() {
                   </span>
                 </div>
               </div>
-              {sportOf(match) === 'football' ? (
-                <FootballScorer
-                  data={data}
-                  match={match}
-                  current={currentSet}
-                  periods={sets}
-                  busy={busy}
-                  onScore={(action, type) => {
-                    if (currentSet) {
-                      const at = Date.now();
-                      void commit((d) =>
-                        scoreAction(
-                          d,
-                          match.id,
-                          currentSet.id,
-                          action,
-                          at,
-                          type,
-                        ),
-                      );
-                    }
-                  }}
-                  onUndo={() => addPoint('UNDO')}
-                  onStart={() => {
-                    const at = Date.now();
-                    void commit((d) => startSet(d, match.id, at));
-                  }}
-                  onEnd={() =>
-                    currentSet &&
-                    setModal({
-                      kind: 'endSet',
-                      matchId: match.id,
-                      setId: currentSet.id,
-                    })
-                  }
-                  onComplete={() =>
-                    setModal({ kind: 'complete', matchId: match.id })
-                  }
-                />
-              ) : scoring ? (
-                <>
-                  <div className="score-grid">
-                    <button
-                      disabled={busy}
-                      className={`score-button home ${flash === 'HOME_POINT' ? 'flash' : ''}`}
-                      style={teamButtonStyle(match.homeColor ?? HOME_COLOR)}
-                      onClick={() => addPoint('HOME_POINT')}
-                      aria-label={`Add point for ${match.homeTeam}`}
-                    >
-                      <span className="team-side">HOME</span>
-                      {match.home?.logo && (
-                        <img
-                          className="team-logo"
-                          src={match.home.logo}
-                          alt=""
-                        />
-                      )}
-                      <span className="team-name">{match.homeTeam}</span>
-                      <span className="score">{score.homeScore}</span>
-                      <span className="point-label">+ POINT</span>
-                    </button>
-                    <button
-                      disabled={busy}
-                      className={`score-button away ${flash === 'AWAY_POINT' ? 'flash' : ''}`}
-                      style={teamButtonStyle(match.awayColor ?? AWAY_COLOR)}
-                      onClick={() => addPoint('AWAY_POINT')}
-                      aria-label={`Add point for ${match.awayTeam}`}
-                    >
-                      <span className="team-side">AWAY</span>
-                      {match.away?.logo && (
-                        <img
-                          className="team-logo"
-                          src={match.away.logo}
-                          alt=""
-                        />
-                      )}
-                      <span className="team-name">{match.awayTeam}</span>
-                      <span className="score">{score.awayScore}</span>
-                      <span className="point-label">+ POINT</span>
-                    </button>
-                  </div>
-                  <p className="sr-only" aria-live="polite">
-                    {match.homeTeam} {score.homeScore}, {match.awayTeam}{' '}
-                    {score.awayScore}
-                  </p>
-                  <div className="scoring-actions">
-                    <button
-                      className="undo"
-                      onClick={() => addPoint('UNDO')}
-                      disabled={
-                        busy ||
-                        !activePoints(
-                          data.events.filter((e) => e.setId === currentSet!.id),
-                        ).length
-                      }
-                    >
-                      ↶ Undo last point
-                    </button>
-                    <button
-                      onClick={() =>
-                        setModal({
-                          kind: 'endSet',
-                          matchId: match.id,
-                          setId: currentSet!.id,
-                        })
-                      }
-                      disabled={busy}
-                    >
-                      End set
-                    </button>
-                  </div>
-                </>
-              ) : match.status !== 'completed' ? (
-                <div className="between">
-                  <h2>
-                    {sets.length ? 'Take a breather.' : 'Ready when you are.'}
-                  </h2>
-                  <p>
-                    {sets.length
-                      ? 'The last set is saved. Start the next one or wrap up the match.'
-                      : 'Start the first set at the whistle. Every point gets an exact timestamp.'}
-                  </p>
-                  <div className="toolbar">
-                    <button
-                      className="primary"
-                      disabled={busy}
-                      onClick={() => {
+              <GameSyncControls
+                data={data}
+                matchId={match.id}
+                online={online}
+                busy={busy}
+                onTakeOver={() => void takeOverScoring()}
+              />
+              <fieldset
+                className="scorer-controls"
+                disabled={!canScoreGame(data, match.id)}
+                aria-label="Scoring controls"
+              >
+                {sportOf(match) === 'football' ? (
+                  <FootballScorer
+                    data={data}
+                    match={match}
+                    current={currentSet}
+                    periods={sets}
+                    busy={busy}
+                    onScore={(action, type) => {
+                      if (currentSet) {
                         const at = Date.now();
-                        void commit((d) => startSet(d, match.id, at));
-                      }}
-                    >
-                      Start Set {sets.length + 1}
-                    </button>
-                    {sets.length > 0 && (
+                        void commit((d) =>
+                          scoreAction(
+                            d,
+                            match.id,
+                            currentSet.id,
+                            action,
+                            at,
+                            type,
+                          ),
+                        );
+                      }
+                    }}
+                    onUndo={() => addPoint('UNDO')}
+                    onStart={() => {
+                      const at = Date.now();
+                      void commit((d) => startSet(d, match.id, at));
+                    }}
+                    onEnd={() =>
+                      currentSet &&
+                      setModal({
+                        kind: 'endSet',
+                        matchId: match.id,
+                        setId: currentSet.id,
+                      })
+                    }
+                    onComplete={() =>
+                      setModal({ kind: 'complete', matchId: match.id })
+                    }
+                  />
+                ) : scoring ? (
+                  <>
+                    <div className="score-grid">
                       <button
                         disabled={busy}
-                        onClick={() =>
-                          setModal({ kind: 'complete', matchId: match.id })
+                        className={`score-button home ${flash === 'HOME_POINT' ? 'flash' : ''}`}
+                        style={teamButtonStyle(match.homeColor ?? HOME_COLOR)}
+                        onClick={() => addPoint('HOME_POINT')}
+                        aria-label={`Add point for ${match.homeTeam}`}
+                      >
+                        <span className="team-side">HOME</span>
+                        {match.home?.logo && (
+                          <img
+                            className="team-logo"
+                            src={match.home.logo}
+                            alt=""
+                          />
+                        )}
+                        <span className="team-name">{match.homeTeam}</span>
+                        <span className="score">{score.homeScore}</span>
+                        <span className="point-label">+ POINT</span>
+                      </button>
+                      <button
+                        disabled={busy}
+                        className={`score-button away ${flash === 'AWAY_POINT' ? 'flash' : ''}`}
+                        style={teamButtonStyle(match.awayColor ?? AWAY_COLOR)}
+                        onClick={() => addPoint('AWAY_POINT')}
+                        aria-label={`Add point for ${match.awayTeam}`}
+                      >
+                        <span className="team-side">AWAY</span>
+                        {match.away?.logo && (
+                          <img
+                            className="team-logo"
+                            src={match.away.logo}
+                            alt=""
+                          />
+                        )}
+                        <span className="team-name">{match.awayTeam}</span>
+                        <span className="score">{score.awayScore}</span>
+                        <span className="point-label">+ POINT</span>
+                      </button>
+                    </div>
+                    <p className="sr-only" aria-live="polite">
+                      {match.homeTeam} {score.homeScore}, {match.awayTeam}{' '}
+                      {score.awayScore}
+                    </p>
+                    <div className="scoring-actions">
+                      <button
+                        className="undo"
+                        onClick={() => addPoint('UNDO')}
+                        disabled={
+                          busy ||
+                          !activePoints(
+                            data.events.filter(
+                              (e) => e.setId === currentSet!.id,
+                            ),
+                          ).length
                         }
                       >
-                        Complete match
+                        ↶ Undo last point
                       </button>
-                    )}
+                      <button
+                        onClick={() =>
+                          setModal({
+                            kind: 'endSet',
+                            matchId: match.id,
+                            setId: currentSet!.id,
+                          })
+                        }
+                        disabled={busy}
+                      >
+                        End set
+                      </button>
+                    </div>
+                  </>
+                ) : match.status !== 'completed' ? (
+                  <div className="between">
+                    <h2>
+                      {sets.length ? 'Take a breather.' : 'Ready when you are.'}
+                    </h2>
+                    <p>
+                      {sets.length
+                        ? 'The last set is saved. Start the next one or wrap up the match.'
+                        : 'Start the first set at the whistle. Every point gets an exact timestamp.'}
+                    </p>
+                    <div className="toolbar">
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => {
+                          const at = Date.now();
+                          void commit((d) => startSet(d, match.id, at));
+                        }}
+                      >
+                        Start Set {sets.length + 1}
+                      </button>
+                      {sets.length > 0 && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            setModal({ kind: 'complete', matchId: match.id })
+                          }
+                        >
+                          Complete match
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <section className="final-score">
-                  <span className="eyebrow">FINAL · SETS WON</span>
-                  <div>
-                    {result!.home} <span>–</span> {result!.away}
-                  </div>
-                  {result!.tied > 0 && <p>{result!.tied} tied set(s)</p>}
-                </section>
-              )}
-              {sportOf(match) === 'volleyball' &&
-                match.status !== 'completed' && (
-                  <div className="sync-row">
-                    <button
-                      onClick={flashSync}
-                      disabled={busy || !!syncFlash || !currentSet}
-                    >
-                      ⊙ Video sync marker
-                    </button>
-                    <small>
-                      {currentSet
-                        ? 'Record this set, face the camera, then tap for the black–white–black flash.'
-                        : 'Start the next set before recording a sync marker.'}
-                    </small>
-                  </div>
+                ) : (
+                  <section className="final-score">
+                    <span className="eyebrow">FINAL · SETS WON</span>
+                    <div>
+                      {result!.home} <span>–</span> {result!.away}
+                    </div>
+                    {result!.tied > 0 && <p>{result!.tied} tied set(s)</p>}
+                  </section>
                 )}
+                {sportOf(match) === 'volleyball' &&
+                  match.status !== 'completed' && (
+                    <div className="sync-row">
+                      <button
+                        onClick={flashSync}
+                        disabled={busy || !!syncFlash || !currentSet}
+                      >
+                        ⊙ Video sync marker
+                      </button>
+                      <small>
+                        {currentSet
+                          ? 'Record this set, face the camera, then tap for the black–white–black flash.'
+                          : 'Start the next set before recording a sync marker.'}
+                      </small>
+                    </div>
+                  )}
+              </fieldset>
               {sets.length > 0 && (
                 <section className="set-history">
                   <h2>
@@ -1200,7 +1333,7 @@ export default function App() {
                   Export match CSV
                 </button>
               </div>
-              {!match.tournamentId && (
+              {!tournament && (
                 <div className="toolbar">
                   <button
                     onClick={() =>
@@ -1259,7 +1392,8 @@ export default function App() {
                 key={match.id}
                 match={match}
                 broadcast={data.broadcasts.find((b) => b.id === match.id)}
-                busy={busy}
+                busy={busy || !canScoreGame(data, match.id)}
+                viewOnly={!canScoreGame(data, match.id)}
                 online={online}
                 onStart={(ownerUid) => {
                   void commit((d) => {
@@ -1297,11 +1431,14 @@ export default function App() {
               <details className="danger-zone">
                 <summary>Match management</summary>
                 <p>
-                  Delete this match and its scoring history from this device.
+                  Delete this match and its scoring history. Synced deletions
+                  apply across your account’s devices.
                 </p>
                 <button
                   className="danger"
-                  disabled={busy || !!syncFlash}
+                  disabled={
+                    busy || !!syncFlash || !canScoreGame(data, match.id)
+                  }
                   onClick={() => {
                     setError('');
                     setModal({ kind: 'deleteMatch', match });
@@ -1580,8 +1717,8 @@ export default function App() {
                 <p>
                   This permanently deletes{' '}
                   <strong>{modal.tournament.name}</strong> and all its matches
-                  and events from this device. Export a backup first if you need
-                  a copy.
+                  and events across synced devices. Export a backup first if you
+                  need a copy.
                 </p>
                 <label>
                   Type the tournament name to confirm

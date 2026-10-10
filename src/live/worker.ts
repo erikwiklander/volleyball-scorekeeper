@@ -42,8 +42,9 @@ export function startLiveWorker(db: IDBPDatabase) {
         if (!(await readSnapshot(db)).syncQueue.length) break;
         report('Updating live score…');
         const transport = await import('./firebase');
-        await flushQueue(db, transport, notify);
+        const sent = await flushQueue(db, transport, notify);
         report('');
+        if (!sent) break;
         again = (await readSnapshot(db)).syncQueue.length > 0;
       } while (again && !stopped && navigator.onLine);
     } catch (error) {

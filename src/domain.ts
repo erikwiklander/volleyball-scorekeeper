@@ -1,4 +1,5 @@
 import type { Broadcast, SyncEntry } from './live/model';
+import type { LibraryLink, LibraryEntry } from './library-sync/model';
 import type {
   TeamLink,
   TeamQueueEntry,
@@ -111,6 +112,8 @@ export interface AppState {
   activeSetId?: string;
 }
 export interface Snapshot {
+  libraryLinks: LibraryLink[];
+  libraryQueue: LibraryEntry[];
   teamLinks: TeamLink[];
   teamQueue: TeamQueueEntry[];
   teamSync: TeamSyncState;
@@ -124,6 +127,8 @@ export interface Snapshot {
   appState: AppState;
 }
 export const emptySnapshot = (): Snapshot => ({
+  libraryLinks: [],
+  libraryQueue: [],
   teamLinks: [],
   teamQueue: [],
   teamSync: { id: 'current', deviceId: '' },

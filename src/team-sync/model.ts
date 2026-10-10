@@ -54,6 +54,7 @@ export interface TeamSyncState {
   deviceId: string;
   ownerUid?: string;
   conflict?: string;
+  libraryNotice?: string;
 }
 export function teamLibrary(data: Snapshot) {
   return data.teams.filter((team) => {
@@ -83,7 +84,10 @@ function enqueue(data: Snapshot, teamId: string, ownerUid: string) {
 }
 export function adoptLocalTeams(data: Snapshot, ownerUid: string) {
   data.teamSync.deviceId ||= crypto.randomUUID();
-  if (data.teamSync.ownerUid !== ownerUid) delete data.teamSync.conflict;
+  if (data.teamSync.ownerUid !== ownerUid) {
+    delete data.teamSync.conflict;
+    delete data.teamSync.libraryNotice;
+  }
   data.teamSync.ownerUid = ownerUid;
   for (const team of data.teams) {
     if (!data.teamLinks.some((link) => link.id === team.id))

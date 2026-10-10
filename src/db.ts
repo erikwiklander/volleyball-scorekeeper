@@ -1,5 +1,6 @@
 import { queueBroadcastChanges } from './live/model';
 import { queueTeamChanges } from './team-sync/model';
+import { queueLibraryChanges, refreshLibraryQueue } from './library-sync/model';
 import { openDB, type IDBPDatabase } from 'idb';
 import { emptySnapshot, type Snapshot } from './domain';
 const stores = [
@@ -14,9 +15,11 @@ const stores = [
   'teamLinks',
   'teamQueue',
   'teamSync',
+  'libraryLinks',
+  'libraryQueue',
 ] as const;
 export function openDatabase(name = 'volleyball-scorekeeper') {
-  return openDB(name, 4, {
+  return openDB(name, 5, {
     blocked() {
       if (typeof window !== 'undefined')
         window.dispatchEvent(new Event('storage-upgrade-blocked'));
@@ -27,6 +30,10 @@ export function openDatabase(name = 'volleyball-scorekeeper') {
         window.dispatchEvent(new Event('storage-upgrade-required'));
     },
     upgrade(db, oldVersion) {
+      if (oldVersion < 5) {
+        db.createObjectStore('libraryLinks', { keyPath: 'id' });
+        db.createObjectStore('libraryQueue', { keyPath: 'id' });
+      }
       if (oldVersion < 4) {
         db.createObjectStore('teamLinks', { keyPath: 'id' });
         db.createObjectStore('teamQueue', { keyPath: 'id' });
@@ -68,9 +75,13 @@ export async function readSnapshot(db: IDBPDatabase): Promise<Snapshot> {
     teamLinks,
     teamQueue,
     teamState,
+    libraryLinks,
+    libraryQueue,
   ] = await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
   await tx.done;
   return {
+    libraryLinks,
+    libraryQueue,
     teamLinks,
     teamQueue,
     teamSync: teamState[0] ?? emptySnapshot().teamSync,
@@ -89,7 +100,11 @@ export async function readSnapshot(db: IDBPDatabase): Promise<Snapshot> {
 export async function mutate(
   db: IDBPDatabase,
   change: (data: Snapshot) => void,
-  options: { queueTeams?: boolean } = {},
+  options: {
+    queueTeams?: boolean;
+    queueLibrary?: boolean;
+    queueLive?: boolean;
+  } = {},
 ): Promise<Snapshot> {
   const tx = db.transaction([...stores], 'readwrite', { durability: 'strict' });
   try {
@@ -105,8 +120,12 @@ export async function mutate(
       teamLinks,
       teamQueue,
       teamState,
+      libraryLinks,
+      libraryQueue,
     ] = await Promise.all(stores.map((s) => tx.objectStore(s).getAll()));
     const data: Snapshot = {
+      libraryLinks,
+      libraryQueue,
       teamLinks,
       teamQueue,
       teamSync: teamState[0] ?? emptySnapshot().teamSync,
@@ -121,7 +140,10 @@ export async function mutate(
     };
     const before = structuredClone(data);
     change(data);
-    queueBroadcastChanges(before, data);
+    if (options.queueLibrary !== false) queueLibraryChanges(before, data);
+    if (options.queueLive !== false) queueBroadcastChanges(before, data);
+    if (options.queueLibrary !== false) queueLibraryChanges(before, data);
+    refreshLibraryQueue(data);
     if (options.queueTeams !== false) queueTeamChanges(before, data);
     for (const name of [
       'broadcasts',
@@ -133,6 +155,8 @@ export async function mutate(
       'events',
       'teamLinks',
       'teamQueue',
+      'libraryLinks',
+      'libraryQueue',
     ] as const) {
       const old = new Map(before[name].map((item) => [item.id, item]));
       const remaining = new Set(data[name].map((item) => item.id));
@@ -141,7 +165,7 @@ export async function mutate(
       for (const item of data[name]) {
         if (!old.has(item.id)) await tx.objectStore(name).add(item);
         else if (JSON.stringify(item) !== JSON.stringify(old.get(item.id))) {
-          if (name === 'events')
+          if (name === 'events' && options.queueLibrary !== false)
             throw new Error('Existing scoring events cannot be modified.');
           await tx.objectStore(name).put(item);
         }
