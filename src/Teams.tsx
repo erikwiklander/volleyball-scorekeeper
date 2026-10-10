@@ -275,6 +275,7 @@ export function MatchSetup({
 }
 
 export function TeamLibrary({
+  syncControls,
   teams,
   initialSport = 'volleyball',
   busy,
@@ -282,6 +283,7 @@ export function TeamLibrary({
   onDelete,
   error,
 }: {
+  syncControls?: import('react').ReactNode;
   teams: Team[];
   initialSport?: Sport;
   error: string;
@@ -312,6 +314,7 @@ export function TeamLibrary({
           + Add team
         </button>
       </div>
+      {syncControls}
       {!teams.length && (
         <p>Save team colors and logos once, then use them in any game.</p>
       )}
@@ -371,8 +374,9 @@ export function TeamLibrary({
               <h2>Delete {editing.name}?</h2>
               <p>
                 Remove this team from your saved teams and future game
-                selections on this device. Existing games, scores, logos and
-                live scoreboards will stay as they are.
+                selections. If team sync is enabled, this deletion also syncs to
+                your other devices. Existing games, scores, logos and live
+                scoreboards will stay as they are.
               </p>
               <p>
                 Any tournament using this team as its default will have that

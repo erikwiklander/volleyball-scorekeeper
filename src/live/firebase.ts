@@ -13,6 +13,7 @@ import {
 import {
   connectDatabaseEmulator,
   getDatabase,
+  get,
   onValue,
   ref,
   runTransaction,
@@ -21,6 +22,11 @@ import {
 import { liveConfig } from './config';
 import type { SyncEntry } from './model';
 import type { GameAnalytics, SiteDayAnalytics } from '../analytics';
+import {
+  cloudTeamRecordSchema,
+  normalizedTeam,
+  type TeamQueueEntry,
+} from '../team-sync/model';
 const config = liveConfig();
 if (!config) throw new Error('Live scores have not been connected yet.');
 const app = initializeApp(config, 'live-scores');
@@ -142,4 +148,53 @@ export function watchSiteAnalytics(
     (snapshot) => onData(snapshot.val() ?? {}),
     onError,
   );
+}
+export function watchTeams(
+  ownerUid: string,
+  onData: (data: unknown) => void,
+  onError: (error: Error) => void,
+) {
+  return onValue(
+    ref(database, `users/${ownerUid}/teams`),
+    (snapshot) => onData(snapshot.val() ?? {}),
+    onError,
+  );
+}
+export async function publishTeam(entry: TeamQueueEntry, deviceId: string) {
+  if ((await publisherIdentity()) !== entry.ownerUid)
+    throw new Error('Sign in with the team owner’s Google account to sync.');
+  const target = ref(database, `users/${entry.ownerUid}/teams/${entry.id}`);
+  const latest = (await get(target)).val();
+  if (
+    latest &&
+    (latest.mutationId === entry.mutationId ||
+      latest.revision !== entry.baseRevision)
+  )
+    return cloudTeamRecordSchema.parse(latest);
+  if (!latest && entry.baseRevision > 0)
+    throw new Error('The cloud team record is unavailable.');
+  const payload = {
+    schemaVersion: 1,
+    revision: entry.baseRevision + 1,
+    mutationId: entry.mutationId,
+    deviceId,
+    deleted: !entry.team,
+    team: entry.team ? normalizedTeam(entry.team) : null,
+    updatedAt: serverTimestamp(),
+  };
+  const result = await runTransaction(
+    target,
+    (current) => {
+      if (
+        current &&
+        (current.mutationId === entry.mutationId ||
+          current.revision !== entry.baseRevision)
+      )
+        return;
+      if (!current && entry.baseRevision > 0) return;
+      return payload;
+    },
+    { applyLocally: false },
+  );
+  return cloudTeamRecordSchema.parse(result.snapshot.val());
 }

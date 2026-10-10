@@ -21,6 +21,70 @@ beforeAll(async () => {
 beforeEach(async () => env.clearDatabase());
 afterAll(async () => env?.cleanup());
 const team = { name: 'Eagles', shortName: '', color: '#008000', logo: '' };
+it('team libraries are private to their Google account and validate revisions and deletion tombstones', async () => {
+  const teamId = crypto.randomUUID();
+  const path = `users/owner/teams/${teamId}`;
+  const dbFor = (uid: string, provider = 'google.com') =>
+    env
+      .authenticatedContext(uid, {
+        firebase: { sign_in_provider: provider, identities: {} },
+      })
+      .database();
+  const teamRef = ref(dbFor('owner'), path);
+  const record = (revision: number) => ({
+    schemaVersion: 1,
+    revision,
+    mutationId: crypto.randomUUID(),
+    deviceId: crypto.randomUUID(),
+    deleted: false,
+    updatedAt: serverTimestamp(),
+    team: {
+      id: teamId,
+      name: 'Private Eagles',
+      sport: 'football',
+      primaryColor: '#123456',
+      secondaryColor: '#ffffff',
+      shortName: 'PE',
+      logo: 'data:image/png;base64,AAAA',
+      createdAt: '2026-10-10T12:00:00.000Z',
+      updatedAt: '2026-10-10T12:00:00.000Z',
+    },
+  });
+  await assertSucceeds(set(teamRef, record(1)));
+  await assertFails(
+    set(ref(dbFor('owner'), `${path}/team/name`), 'Bypassed revision'),
+  );
+  await assertSucceeds(get(ref(dbFor('owner'), 'users/owner/teams')));
+  for (const db of [
+    env.unauthenticatedContext().database(),
+    dbFor('other'),
+    dbFor('owner', 'anonymous'),
+  ]) {
+    await assertFails(get(ref(db, path)));
+    await assertFails(get(ref(db, 'users/owner/teams')));
+    await assertFails(set(ref(db, path), record(2)));
+  }
+  await assertFails(get(ref(dbFor('owner'), 'users')));
+  await assertFails(set(teamRef, null));
+  await assertFails(set(teamRef, record(1)));
+  await assertFails(set(teamRef, record(3)));
+  const bad = record(2);
+  await assertFails(
+    set(teamRef, { ...bad, team: { ...bad.team, id: crypto.randomUUID() } }),
+  );
+  await assertFails(
+    set(teamRef, {
+      ...bad,
+      team: { ...bad.team, logo: 'https://example.com/tracker' },
+    }),
+  );
+  await assertFails(set(teamRef, { ...bad, unexpected: true }));
+  await assertSucceeds(
+    set(teamRef, { ...record(2), deleted: true, team: null }),
+  );
+  await assertFails(set(teamRef, record(2))); // An old offline writer cannot resurrect it.
+  await assertFails(set(ref(dbFor('owner'), 'users/owner/teams'), null));
+});
 it('keeps analytics writes and session IDs private; only the owner can read game counts', async () => {
   await set(owner(), payload());
   await env.withSecurityRulesDisabled(async (context) => {

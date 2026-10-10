@@ -2,6 +2,62 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "users": {
+      "$uid": {
+        "teams": {
+          ".read": "auth != null && auth.uid == $uid && auth.token.firebase.sign_in_provider == 'google.com'",
+          "$teamId": {
+            ".write": "auth != null && auth.uid == $uid && auth.token.firebase.sign_in_provider == 'google.com' && newData.exists() && $teamId.matches(/^[a-f0-9-]{36}$/)",
+            ".validate": "newData.hasChildren(['schemaVersion', 'revision', 'mutationId', 'deviceId', 'deleted', 'updatedAt']) && (newData.child('deleted').val() == !newData.child('team').exists()) && newData.child('revision').val() == (data.exists() ? data.child('revision').val() + 1 : 1) && newData.child('updatedAt').val() == now && (!data.exists() || newData.child('mutationId').val() != data.child('mutationId').val())",
+            "schemaVersion": { ".validate": "newData.val() == 1" },
+            "revision": {
+              ".validate": "newData.isNumber() && newData.val() == (data.parent().exists() ? data.val() + 1 : 1)"
+            },
+            "mutationId": {
+              ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9-]{36}$/) && (!data.exists() || newData.val() != data.val())"
+            },
+            "deviceId": {
+              ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9-]{36}$/)"
+            },
+            "deleted": { ".validate": "newData.isBoolean()" },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() == now"
+            },
+            "team": {
+              ".validate": "newData.hasChildren(['id', 'sport', 'name', 'primaryColor', 'createdAt', 'updatedAt'])",
+              "id": { ".validate": "newData.val() == $teamId" },
+              "sport": {
+                ".validate": "newData.val() == 'volleyball' || newData.val() == 'football'"
+              },
+              "name": {
+                ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+              },
+              "shortName": {
+                ".validate": "newData.isString() && newData.val().length <= 20"
+              },
+              "primaryColor": {
+                ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)"
+              },
+              "secondaryColor": {
+                ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)"
+              },
+              "logo": {
+                ".validate": "newData.isString() && newData.val().length <= 1500000 && newData.val().matches(/^data:image\\/(png|jpeg|webp);base64,[A-Za-z0-9+\\/=]+$/)"
+              },
+              "createdAt": {
+                ".validate": "newData.isString() && newData.val().length <= 40 && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$/)"
+              },
+              "updatedAt": {
+                ".validate": "newData.isString() && newData.val().length <= 40 && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$/)"
+              },
+              "$other": { ".validate": "false" }
+            },
+            "$other": { ".validate": "false" }
+          }
+        },
+        "$other": { ".validate": "false" }
+      }
+    },
     "analytics": {
       "site": {
         "summary": {

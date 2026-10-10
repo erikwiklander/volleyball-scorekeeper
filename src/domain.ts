@@ -1,4 +1,9 @@
 import type { Broadcast, SyncEntry } from './live/model';
+import type {
+  TeamLink,
+  TeamQueueEntry,
+  TeamSyncState,
+} from './team-sync/model';
 export type Sport = 'volleyball' | 'football';
 export const sportOf = (record?: { sport?: Sport }): Sport =>
   record?.sport ?? 'volleyball';
@@ -106,6 +111,9 @@ export interface AppState {
   activeSetId?: string;
 }
 export interface Snapshot {
+  teamLinks: TeamLink[];
+  teamQueue: TeamQueueEntry[];
+  teamSync: TeamSyncState;
   broadcasts: Broadcast[];
   syncQueue: SyncEntry[];
   teams: Team[];
@@ -116,6 +124,9 @@ export interface Snapshot {
   appState: AppState;
 }
 export const emptySnapshot = (): Snapshot => ({
+  teamLinks: [],
+  teamQueue: [],
+  teamSync: { id: 'current', deviceId: '' },
   broadcasts: [],
   syncQueue: [],
   teams: [],
@@ -367,7 +378,13 @@ export function saveAppearance(
   let teamId = draft.teamId;
   if (
     teamId &&
-    !data.teams.some((t) => t.id === teamId && sportOf(t) === sportOf(draft))
+    (!data.teams.some(
+      (t) => t.id === teamId && sportOf(t) === sportOf(draft),
+    ) ||
+      data.teamLinks.some(
+        (link) =>
+          link.id === teamId && link.ownerUid !== data.teamSync.ownerUid,
+      ))
   )
     throw new Error('Selected team no longer exists.');
   if (!teamId) {

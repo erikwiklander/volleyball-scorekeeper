@@ -8,6 +8,9 @@ import {
 } from './domain';
 import LiveControls from './live/LiveControls';
 import SiteAnalytics from './live/SiteAnalytics';
+import TeamSyncControls from './team-sync/TeamSyncControls';
+import { teamLibrary } from './team-sync/model';
+import { startTeamWorker } from './team-sync/worker';
 import { startLiveWorker } from './live/worker';
 import {
   applyUpdate,
@@ -138,6 +141,7 @@ export default function App() {
   }, [syncFlash]);
   const db = useRef<IDBPDatabase>(undefined);
   const liveWorker = useRef<ReturnType<typeof startLiveWorker>>(undefined);
+  const teamWorker = useRef<ReturnType<typeof startTeamWorker>>(undefined);
   const channel = useRef<BroadcastChannel>(undefined);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -157,6 +161,7 @@ export default function App() {
         setData(snapshot);
         setReady(true);
         liveWorker.current = startLiveWorker(connection);
+        teamWorker.current = startTeamWorker(connection);
       })
       .catch(() =>
         setError(
@@ -185,7 +190,18 @@ export default function App() {
         'Offline setup failed. Reconnect and reload before using the app offline.',
       );
     const connection = () => setOnline(navigator.onLine);
+    const storageBlocked = () =>
+      setError(
+        'Close other Scorekeeper tabs or installed app windows, then reload to finish the storage update. Your saved data stays on this device.',
+      );
+    const storageRequired = () =>
+      setError(
+        'A newer Scorekeeper tab updated device storage. Reload this tab before continuing.',
+      );
     window.addEventListener('live-sync', refresh);
+    window.addEventListener('team-sync', refresh);
+    window.addEventListener('storage-upgrade-blocked', storageBlocked);
+    window.addEventListener('storage-upgrade-required', storageRequired);
     window.addEventListener('offline-ready', available);
     window.addEventListener('offline-failed', failed);
     window.addEventListener('online', connection);
@@ -197,9 +213,13 @@ export default function App() {
     return () => {
       alive = false;
       liveWorker.current?.stop();
+      teamWorker.current?.stop();
       db.current?.close();
       channel.current?.close();
       window.removeEventListener('live-sync', refresh);
+      window.removeEventListener('team-sync', refresh);
+      window.removeEventListener('storage-upgrade-blocked', storageBlocked);
+      window.removeEventListener('storage-upgrade-required', storageRequired);
       window.removeEventListener('offline-ready', available);
       window.removeEventListener('offline-failed', failed);
       window.removeEventListener('online', connection);
@@ -267,6 +287,7 @@ export default function App() {
       setData(next);
       channel.current?.postMessage('changed');
       void liveWorker.current?.wake();
+      if (next.teamQueue.length) void teamWorker.current?.wake();
       after?.();
     } catch (err) {
       setSyncFlash(undefined);
@@ -523,6 +544,7 @@ export default function App() {
   }
   const acceptsSport = (m: Match) =>
     sportFilter === 'all' || sportOf(m) === sportFilter;
+  const libraryTeams = teamLibrary(data);
   const standaloneGames = data.matches
     .filter((m) => !m.tournamentId && acceptsSport(m))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -701,20 +723,46 @@ export default function App() {
               </section>
               <SiteAnalytics />
               <TeamLibrary
+                syncControls={
+                  <TeamSyncControls
+                    online={online}
+                    busy={busy}
+                    cached={!!data.teamSync.ownerUid}
+                    conflict={data.teamSync.conflict}
+                    onDismiss={() =>
+                      void commit((draft) => {
+                        delete draft.teamSync.conflict;
+                      })
+                    }
+                  />
+                }
                 initialSport={
                   sportFilter === 'football' ? 'football' : 'volleyball'
                 }
                 error={error}
-                teams={data.teams.filter(
+                teams={libraryTeams.filter(
                   (t) => sportFilter === 'all' || sportOf(t) === sportFilter,
                 )}
                 busy={busy}
                 onDelete={(teamId, done) => {
-                  void commit((d) => deleteTeam(d, teamId), done);
+                  void commit((d) => {
+                    if (!teamLibrary(d).some((team) => team.id === teamId))
+                      throw new Error(
+                        'The team account changed. Reopen the team before deleting it.',
+                      );
+                    deleteTeam(d, teamId);
+                  }, done);
                 }}
                 onSave={(team, done, editing) => {
                   void commit((d) => {
                     const existing = d.teams.find((t) => t.id === team.id);
+                    if (
+                      existing &&
+                      !teamLibrary(d).some((item) => item.id === team.id)
+                    )
+                      throw new Error(
+                        'The team account changed. Reopen the team before editing it.',
+                      );
                     if (editing && !existing)
                       throw new Error(
                         'This team has been deleted in another tab. Close this editor and add a new team if needed.',
@@ -1420,7 +1468,7 @@ export default function App() {
                     defaultValue={modal.tournament?.defaultTeamId ?? ''}
                   >
                     <option value="">None</option>
-                    {data.teams.map((team) => (
+                    {libraryTeams.map((team) => (
                       <option key={team.id} value={team.id}>
                         {team.name}
                       </option>
@@ -1452,7 +1500,7 @@ export default function App() {
                 initialSport={
                   sportFilter === 'football' ? 'football' : 'volleyball'
                 }
-                teams={data.teams}
+                teams={libraryTeams}
                 defaultTeamId={
                   data.tournaments.find((t) => t.id === modal.tournamentId)
                     ?.defaultTeamId
