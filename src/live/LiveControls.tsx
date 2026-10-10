@@ -4,6 +4,7 @@ import type { Broadcast } from './model';
 import { liveConfig, liveTitle, liveUrl } from './config';
 import type { Match } from '../domain';
 import { getLiveStatus, subscribeLiveStatus } from './worker';
+import Audience from './Audience';
 export default function LiveControls({
   broadcast,
   match,
@@ -252,6 +253,13 @@ export default function LiveControls({
         </>
       )}
       {error && <p role="alert">{error}</p>}
+      {ownsLink && broadcast && broadcast.syncedRevision > 0 && (
+        <Audience
+          key={broadcast.publicId}
+          publicId={broadcast.publicId}
+          live={broadcast.enabled && match.status === 'in_progress'}
+        />
+      )}
     </section>
   );
 }

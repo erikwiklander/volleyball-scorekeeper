@@ -20,6 +20,7 @@ import {
 } from 'firebase/database';
 import { liveConfig } from './config';
 import type { SyncEntry } from './model';
+import type { GameAnalytics, SiteDayAnalytics } from '../analytics';
 const config = liveConfig();
 if (!config) throw new Error('Live scores have not been connected yet.');
 const app = initializeApp(config, 'live-scores');
@@ -119,5 +120,26 @@ export function watchMatch(
 export function watchConnection(onConnected: (connected: boolean) => void) {
   return onValue(ref(database, '.info/connected'), (snapshot) =>
     onConnected(snapshot.val() === true),
+  );
+}
+export function watchGameAnalytics(
+  publicId: string,
+  onData: (data: GameAnalytics | undefined) => void,
+  onError: (error: Error) => void,
+) {
+  return onValue(
+    ref(database, `analytics/games/${publicId}/summary`),
+    (snapshot) => onData(snapshot.val() ?? undefined),
+    onError,
+  );
+}
+export function watchSiteAnalytics(
+  onData: (data: Record<string, SiteDayAnalytics>) => void,
+  onError: (error: Error) => void,
+) {
+  return onValue(
+    ref(database, 'analytics/site/summary'),
+    (snapshot) => onData(snapshot.val() ?? {}),
+    onError,
   );
 }

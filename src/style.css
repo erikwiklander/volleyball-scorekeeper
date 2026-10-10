@@ -1145,3 +1145,50 @@ dialog.sync-white {
 .football-scoring .scoring-actions {
   position: static;
 }
+.site-analytics {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line, #d7ded6);
+  border-radius: 12px;
+}
+.site-analytics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.audience {
+  margin-top: 1.5rem;
+}
+.analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.analytics-metrics div {
+  padding: 0.85rem;
+  background: #f6f5ef;
+  border-radius: 10px;
+}
+.analytics-metrics dt {
+  font-size: 0.8rem;
+}
+.analytics-metrics dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.8rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.analytics-history {
+  width: 100%;
+  font-size: 0.8rem;
+  border-collapse: collapse;
+}
+.analytics-history th,
+.analytics-history td {
+  padding: 0.6rem 0.4rem;
+  text-align: right;
+  border-bottom: 1px solid #d7ded6;
+}
+.analytics-history th:first-child {
+  text-align: left;
+  white-space: nowrap;
+}

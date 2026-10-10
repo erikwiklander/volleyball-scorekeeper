@@ -2,6 +2,7 @@ import { periodLabel, sportOf } from '../domain';
 import { useEffect, useState } from 'react';
 import { liveConfig, liveTitle } from './config';
 import { publicBroadcastSchema, type PublicBroadcast } from './model';
+import { startAnalytics } from '../analytics';
 export default function LiveScorePage({ publicId }: { publicId: string }) {
   const [broadcast, setBroadcast] = useState<PublicBroadcast>();
   const [loading, setLoading] = useState(true);
@@ -69,6 +70,9 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
     };
   }, [publicId]);
   const match = broadcast?.published ? broadcast.match : undefined;
+  useEffect(() => {
+    if (match) return startAnalytics('scoreboard', publicId);
+  }, [publicId, match?.status, !!match]);
   useEffect(() => {
     const previous = document.title;
     document.title = match

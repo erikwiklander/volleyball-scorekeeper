@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import App from './App';
 import LiveScorePage from './live/LiveScorePage';
+import { startAnalytics } from './analytics';
 export default function Root() {
   const [route, setRoute] = useState(() => ({
     hash: location.hash,
@@ -19,5 +20,7 @@ export default function Root() {
   const live =
     route.hash.match(/^#\/live\/([a-zA-Z0-9_-]{1,128})(?:\/[^/]+)?$/) ??
     route.pathname.match(/\/live\/([a-zA-Z0-9_-]{1,128})\/?$/);
+  const surface = live ? 'scoreboard' : 'scorer';
+  useEffect(() => startAnalytics(surface), [surface]);
   return live ? <LiveScorePage publicId={live[1]} /> : <App />;
 }

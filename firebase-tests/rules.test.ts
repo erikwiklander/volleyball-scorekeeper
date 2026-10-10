@@ -21,6 +21,46 @@ beforeAll(async () => {
 beforeEach(async () => env.clearDatabase());
 afterAll(async () => env?.cleanup());
 const team = { name: 'Eagles', shortName: '', color: '#008000', logo: '' };
+it('keeps analytics writes and session IDs private; only the owner can read game counts', async () => {
+  await set(owner(), payload());
+  await env.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), 'analytics'), {
+      site: {
+        summary: { '2026-10-10': { visits: 2 } },
+        days: { secret: true },
+      },
+      games: {
+        'public-link': { summary: { viewers: 1 }, sessions: { secret: true } },
+      },
+    });
+  });
+  const anonymousDb = env.unauthenticatedContext().database();
+  const googleDb = env
+    .authenticatedContext('owner', {
+      firebase: { sign_in_provider: 'google.com', identities: {} },
+    })
+    .database();
+  const otherDb = env
+    .authenticatedContext('other', {
+      firebase: { sign_in_provider: 'google.com', identities: {} },
+    })
+    .database();
+  await assertSucceeds(get(ref(googleDb, 'analytics/site/summary')));
+  await assertSucceeds(
+    get(ref(googleDb, 'analytics/games/public-link/summary')),
+  );
+  await assertFails(get(ref(otherDb, 'analytics/games/public-link/summary')));
+  for (const db of [anonymousDb, googleDb, otherDb]) {
+    await assertFails(get(ref(db, 'analytics')));
+    await assertFails(get(ref(db, 'analytics/site/days')));
+    await assertFails(get(ref(db, 'analytics/games/public-link/sessions')));
+    await assertFails(set(ref(db, 'analytics/site/summary'), { visits: 900 }));
+    await assertFails(
+      set(ref(db, 'analytics/games/public-link/summary'), { viewers: 900 }),
+    );
+  }
+  await assertFails(get(ref(anonymousDb, 'analytics/site/summary')));
+});
 const payload = (revision = 1) => ({
   schemaVersion: 1,
   ownerUid: 'owner',

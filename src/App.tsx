@@ -7,6 +7,7 @@ import {
   type Sport,
 } from './domain';
 import LiveControls from './live/LiveControls';
+import SiteAnalytics from './live/SiteAnalytics';
 import { startLiveWorker } from './live/worker';
 import {
   applyUpdate,
@@ -698,6 +699,7 @@ export default function App() {
                   </div>
                 )}
               </section>
+              <SiteAnalytics />
               <TeamLibrary
                 initialSport={
                   sportFilter === 'football' ? 'football' : 'volleyball'

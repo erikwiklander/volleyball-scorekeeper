@@ -2,6 +2,20 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "analytics": {
+      "site": {
+        "summary": {
+          ".read": "auth != null && auth.token.firebase.sign_in_provider == 'google.com'"
+        }
+      },
+      "games": {
+        "$publicId": {
+          "summary": {
+            ".read": "auth != null && auth.token.firebase.sign_in_provider == 'google.com' && root.child('matches').child($publicId).child('ownerUid').val() == auth.uid"
+          }
+        }
+      }
+    },
     "matches": {
       "$publicId": {
         ".validate": "newData.hasChildren([\"schemaVersion\", \"ownerUid\", \"revision\", \"published\", \"updatedAt\"]) && (newData.child('published').val() == newData.child('match').exists())",

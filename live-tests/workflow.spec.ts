@@ -93,6 +93,14 @@ test('public viewer follows points, offline recovery, final results, stop and de
       viewer.getByRole('heading', { name: 'Eagles vs Falcons' }),
     ).toBeVisible();
     await expect(viewer).toHaveTitle('Eagles vs Falcons — Live score');
+    const audience = page.getByRole('region', { name: 'Game audience' });
+    const metric = (label: string) =>
+      audience
+        .locator('.analytics-metrics div')
+        .filter({ has: page.getByText(label, { exact: true }) })
+        .locator('dd');
+    await expect(metric('Total viewers')).toHaveText('1');
+    await expect(metric('Viewed while live')).toHaveText('0');
     const legacy = new URL(url);
     const publicId = legacy.pathname.match(/\/live\/([^/]+)/)![1];
     legacy.pathname = '/volleyball-scorekeeper/';
@@ -116,6 +124,10 @@ test('public viewer follows points, offline recovery, final results, stop and de
     expect(databases).not.toContain('firebaseLocalStorageDb');
     expect(databases).not.toContain('volleyball-scorekeeper');
     await page.getByRole('button', { name: 'Start Set 1' }).click();
+    await expect(metric('Viewed while live')).toHaveText('1');
+    await expect(metric('Watching now')).toHaveText('1');
+    await expect(metric('Peak watching live')).toHaveText('1');
+    await expect(metric('Total viewers')).toHaveText('1');
     const home = page.getByRole('button', { name: 'Add point for Eagles' });
     await home.click();
     const points = viewer.locator('.public-points');
@@ -174,6 +186,15 @@ test('public viewer follows points, offline recovery, final results, stop and de
       .getByRole('button', { name: 'Complete match', exact: true })
       .click();
     await expect(viewer.getByText('FINAL', { exact: true })).toBeVisible();
+    await expect(metric('Watching now')).toHaveText('0');
+    await expect(metric('Viewed while live')).toHaveText('1');
+    await expect(
+      viewer.getByRole('region', { name: 'Game audience' }),
+    ).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath('game-audience.png'),
+      fullPage: true,
+    });
     await expect(viewer.locator('.public-set')).toContainText('Sets 1–1');
     await expect(
       viewer.locator('.public-history tbody tr').first().locator('td'),
@@ -203,6 +224,17 @@ test('public viewer follows points, offline recovery, final results, stop and de
     await expect(
       viewer.getByRole('heading', { name: 'Score unavailable' }),
     ).toBeVisible();
+    await page.getByText('Site analytics', { exact: true }).click();
+    await expect(
+      page.getByText('Daily site traffic · UTC dates', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator('.analytics-history tbody tr').first().locator('td').nth(2),
+    ).not.toHaveText('0');
+    await page.screenshot({
+      path: testInfo.outputPath('site-analytics.png'),
+      fullPage: true,
+    });
   } finally {
     await viewerContext.close();
   }
