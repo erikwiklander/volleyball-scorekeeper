@@ -396,3 +396,51 @@ it('accepts football snapshots and rejects unsupported sports', async () => {
     set(owner(), { ...next, match: { ...next.match, sport: 'unknown' } }),
   );
 });
+
+it('recaps cannot be forged; private recaps are owner-only and public recaps require a completed published match', async () => {
+  const viewer = env.unauthenticatedContext().database();
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.database();
+    await set(ref(db, 'matches/recap-test'), {
+      published: true,
+      gameId: 'game',
+      match: { status: 'completed' },
+    });
+    await set(ref(db, 'recaps/owner/game'), {
+      text: 'Saved recap',
+      scoreKey: 'key',
+    });
+  });
+  await assertSucceeds(get(ref(viewer, 'publicRecaps/recap-test')));
+  await assertSucceeds(get(ref(privateDb(), 'recaps/owner/game')));
+  await assertFails(get(ref(privateDb('other'), 'recaps/owner/game')));
+  await assertFails(get(ref(viewer, 'recaps/owner/game')));
+  await assertFails(
+    set(ref(privateDb(), 'recaps/owner/game'), { text: 'Forged' }),
+  );
+  await assertFails(
+    set(ref(privateDb(), 'publicRecaps/recap-test'), {
+      text: 'Forged',
+      gameId: 'game',
+    }),
+  );
+  await assertFails(get(ref(viewer, 'recapBudget')));
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await set(ref(ctx.database(), 'publicRecaps/recap-test'), {
+      text: 'Saved recap',
+      scoreKey: 'key',
+      gameId: 'game',
+    });
+  });
+  await assertSucceeds(get(ref(viewer, 'publicRecaps/recap-test')));
+  for (const change of [
+    { published: false, gameId: 'game', match: { status: 'completed' } },
+    { published: true, gameId: 'game', match: { status: 'in_progress' } },
+    { published: true, gameId: 'other', match: { status: 'completed' } },
+  ]) {
+    await env.withSecurityRulesDisabled(async (ctx) =>
+      set(ref(ctx.database(), 'matches/recap-test'), change),
+    );
+    await assertFails(get(ref(viewer, 'publicRecaps/recap-test')));
+  }
+});

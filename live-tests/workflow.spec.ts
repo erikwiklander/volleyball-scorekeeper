@@ -199,6 +199,43 @@ test('public viewer follows points, offline recovery, final results, stop and de
     await expect(points).toHaveText(['1', '1']);
     await expect(viewer.getByText('Sets won', { exact: true })).toHaveCount(2);
     await expect(viewer.locator('.public-history .current')).toHaveCount(0);
+    // Seed the saved server response; browser tests never call a paid provider.
+    const adminHeaders = { Authorization: 'Bearer owner' };
+    const databaseBase = 'http://127.0.0.1:9000';
+    const suffix = '.json?ns=demo-volleyball-scorekeeper-default-rtdb';
+    const remote = await (
+      await page.request.get(`${databaseBase}/matches/${publicId}${suffix}`, {
+        headers: adminHeaders,
+      })
+    ).json();
+    const recap = {
+      text: 'Eagles and Falcons split the match 1–1 in sets, each winning one set.',
+      scoreKey: JSON.stringify([
+        'Eagles',
+        'Falcons',
+        [
+          [1, 2, 0],
+          [2, 0, 1],
+        ],
+      ]),
+    };
+    const privateWrite = await page.request.put(
+      `${databaseBase}/recaps/${remote.ownerUid}/${remote.gameId}${suffix}`,
+      { headers: adminHeaders, data: { ...recap, status: 'ready' } },
+    );
+    expect(privateWrite.ok()).toBe(true);
+    const publicWrite = await page.request.put(
+      `${databaseBase}/publicRecaps/${publicId}${suffix}`,
+      { headers: adminHeaders, data: { ...recap, gameId: remote.gameId } },
+    );
+    expect(publicWrite.ok()).toBe(true);
+    await expect(
+      page.getByRole('region', { name: 'AI game recap' }),
+    ).toContainText(recap.text);
+    await expect(
+      viewer.getByRole('region', { name: 'AI game recap' }),
+    ).toContainText(recap.text);
+
     await expect(
       viewer.locator('.public-history tbody tr').first().locator('td'),
     ).toHaveText(['2', '0']);
@@ -212,6 +249,9 @@ test('public viewer follows points, offline recovery, final results, stop and de
     await expect(
       viewer.getByRole('heading', { name: 'Score unavailable' }),
     ).toBeVisible();
+    await expect(
+      viewer.getByRole('region', { name: 'AI game recap' }),
+    ).toHaveCount(0);
     await page.getByRole('button', { name: 'Start live sharing' }).click();
     await expect(viewer.getByText('FINAL', { exact: true })).toBeVisible();
     await context.setOffline(true);

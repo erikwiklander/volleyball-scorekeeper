@@ -169,3 +169,21 @@ npx firebase deploy --only functions:live-preview,hosting,database
 ```
 
 The `analyticsEvent` HTTP function uses the existing Firebase project, with no minimum instances, one maximum instance, and a 600-request/minute limit per warm instance. It accepts browser requests from `LIVE_VIEWER_ORIGIN` and `LIVE_SCORER_ORIGIN` (default `https://erikwiklander.github.io`). Set the scorer origin for another deployment in `functions/.env.<project-id>`. Local development never records production traffic; live tests use the local database emulator. Analytics adds function and database usage, especially while viewers are watching. Limits are operational safeguards, not a billing cap or bot-proof attribution. Per-game deduplication is bounded at 10,000 sessions; daily site tracking is bounded at 10,000 page loads. Daily records are pruned to 30 days on the next accepted site visit; game totals remain with their public link.
+
+## AI game recaps
+
+Completed games synced through Google sign-in receive a saved, one- or two-sentence AI recap above the final result. It appears in the scorer and, when published, on the shared scoreboard. Offline completion syncs first, then generates online. Local-only games need Google sync before a recap can be generated. Previously completed games are not automatically backfilled on deployment; importing or syncing them for the first time counts as a new generation attempt.
+
+The `gameRecap` Realtime Database trigger reads the private game history, resolves undo events, and computes set/quarter results, largest leads, lead changes, and scoring runs. It sends only team names and derived scoring facts to OpenAI's Responses API (`gpt-6-luna`, no reasoning, `store: false`, at most 200 output tokens). No logos, account details, timestamps, or private event logs are sent. AI prose can still be imperfect; the recorded scores remain authoritative.
+
+An atomic persistent claim allows **one attempt per game**, including failures. A persistent UTC daily quota allows at most **20 attempts per Google account and 100 across the project**. Failed or quota-limited attempts do not automatically retry or regenerate. Corrected scoring histories invalidate an old recap rather than spending again. Quotas limit AI calls; they are not a cap on Firebase function/database costs. Public viewers only read saved prose and never trigger an AI call. Stopping sharing revokes access to the public recap; the owner retains their private recap.
+
+Save the server credential using Firebase's hidden prompt (never put it in Vite variables, GitHub, source files, or a browser):
+
+```sh
+./node_modules/.bin/firebase functions:secrets:set OPENAI_API_KEY --project ew-volleyball-scorekeeper
+```
+
+Then build and deploy functions, Hosting, and database rules together. A rotated secret requires redeploying `gameRecap`. The `sharedGameRecap` trigger mirrors an existing recap when a completed game's sharing changes; it has no API secret and never generates prose. Both triggers use one maximum instance, no warm minimum, and disabled event retries. Recap failure never blocks scoring or completion.
+
+Tests mock provider output and use the local database emulator for owner privacy, read-only public access, summary rendering, stopping sharing, and duplicate/cost controls. No automated tests use a production API key. References: [OpenAI text generation](https://developers.openai.com/api/docs/guides/text), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [Firebase database triggers](https://firebase.google.com/docs/functions/database-events?gen=2nd), and [Firebase secrets](https://firebase.google.com/docs/functions/config-env?gen=2nd).

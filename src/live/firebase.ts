@@ -334,3 +334,15 @@ export async function publishTeam(entry: TeamQueueEntry, deviceId: string) {
   );
   return cloudTeamRecordSchema.parse(result.snapshot.val());
 }
+
+export function watchRecap(
+  path: string,
+  onData: (data: { text?: string; scoreKey?: string } | undefined) => void,
+  onError: (error: Error) => void,
+) {
+  return onValue(
+    ref(database, path),
+    (snapshot) => onData(snapshot.val() ?? undefined),
+    onError,
+  );
+}

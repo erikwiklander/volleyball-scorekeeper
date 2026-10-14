@@ -1,3 +1,4 @@
+import Recap from '../Recap';
 import { periodLabel, sportOf } from '../domain';
 import { useEffect, useState } from 'react';
 import { liveConfig, liveTitle } from './config';
@@ -138,6 +139,16 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
               {match.home.name} <span className="muted">vs</span>{' '}
               {match.away.name}
             </h1>
+            {completed && (
+              <Recap
+                path={`publicRecaps/${publicId}`}
+                scoreKey={JSON.stringify([
+                  match.home.name,
+                  match.away.name,
+                  sets.map((s) => [s.setNumber, s.homeScore, s.awayScore]),
+                ])}
+              />
+            )}
             <p className="live-state" role="status">
               <span
                 className={`live-dot ${status === 'LIVE' ? 'connected' : ''}`}

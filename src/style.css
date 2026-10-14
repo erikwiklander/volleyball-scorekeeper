@@ -1218,3 +1218,15 @@ dialog.sync-white {
   display: block;
   margin-top: 0.5rem;
 }
+
+.game-recap {
+  background: #eaf0e1;
+  border-left: 4px solid #27783b;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 16px 0 24px;
+}
+.game-recap p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}

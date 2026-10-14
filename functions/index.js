@@ -84,3 +84,5 @@ export const livePreview = onRequest(
     return handler(request, response);
   },
 );
+
+export { gameRecap, sharedGameRecap } from './recap-trigger.js';

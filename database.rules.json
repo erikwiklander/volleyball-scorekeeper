@@ -277,6 +277,16 @@
           ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() % 1 == 0"
         }
       }
+    },
+    "recaps": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid && auth.token.firebase.sign_in_provider == 'google.com'"
+      }
+    },
+    "publicRecaps": {
+      "$publicId": {
+        ".read": "root.child('matches').child($publicId).child('published').val() == true && root.child('matches').child($publicId).child('match').child('status').val() == 'completed' && root.child('matches').child($publicId).child('gameId').isString() && (!data.exists() || root.child('matches').child($publicId).child('gameId').val() == data.child('gameId').val())"
+      }
     }
   }
 }

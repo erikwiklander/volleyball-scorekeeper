@@ -1,3 +1,4 @@
+import Recap from './Recap';
 import FootballScorer from './FootballScorer';
 import {
   calculateScore,
@@ -1090,6 +1091,23 @@ export default function App() {
                 disabled={!canScoreGame(data, match.id)}
                 aria-label="Scoring controls"
               >
+                {match.status === 'completed' && (
+                  <Recap
+                    path={
+                      data.teamSync.ownerUid
+                        ? `recaps/${data.teamSync.ownerUid}/${match.id}`
+                        : undefined
+                    }
+                    scoreKey={JSON.stringify([
+                      match.homeTeam,
+                      match.awayTeam,
+                      sets.map((s) => {
+                        const score = setScore(data, s.id);
+                        return [s.setNumber, score.homeScore, score.awayScore];
+                      }),
+                    ])}
+                  />
+                )}
                 {sportOf(match) === 'football' ? (
                   <FootballScorer
                     data={data}
