@@ -12,7 +12,7 @@ const databaseUrl = defineString('LIVE_DATABASE_URL');
 let processRecap;
 export const gameRecap = onValueWritten(
   {
-    ref: '/users/{uid}/games/{gameId}',
+    ref: '/users/{uid}/games/{gameId}/revision',
     region: 'us-central1',
     memory: '256MiB',
     cpu: 'gcf_gen1',
@@ -24,8 +24,7 @@ export const gameRecap = onValueWritten(
     secrets: [key],
   },
   async (event) => {
-    if (event.data.after.val()?.deleted || !event.data.after.val()?.payload)
-      return;
+    if (!event.data.after.exists()) return;
     processRecap ??= createRecapProcessor({
       database: getDatabase(
         getApps()[0] ?? initializeApp({ databaseURL: databaseUrl.value() }),
@@ -38,7 +37,7 @@ export const gameRecap = onValueWritten(
 
 export const sharedGameRecap = onValueWritten(
   {
-    ref: '/matches/{publicId}',
+    ref: '/matches/{publicId}/match/status',
     region: 'us-central1',
     memory: '256MiB',
     cpu: 'gcf_gen1',
@@ -51,8 +50,8 @@ export const sharedGameRecap = onValueWritten(
   async (event) => {
     // Skip every ordinary live point; only availability or final results matter.
     if (
-      event.data.before.val()?.match?.status !== 'completed' &&
-      event.data.after.val()?.match?.status !== 'completed'
+      event.data.before.val() !== 'completed' &&
+      event.data.after.val() !== 'completed'
     )
       return;
     const database = getDatabase(
