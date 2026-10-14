@@ -176,6 +176,8 @@ Completed games synced through Google sign-in receive a saved, one- or two-sente
 
 The `gameRecap` Realtime Database trigger reads the private game history, resolves undo events, and computes set/quarter results, largest leads, lead changes, and scoring runs. It sends only team names and derived scoring facts to OpenAI's Responses API (`gpt-6-luna`, no reasoning, `store: false`, at most 200 output tokens). No logos, account details, timestamps, or private event logs are sent. AI prose can still be imperfect; the recorded scores remain authoritative.
 
+Recaps favor Vandegrift (school volleyball, including the VHS abbreviation) and Roots (club volleyball, including age/team variants). Favorite wins sound warmly celebratory, losses disappointed but respectful, and ties balanced. The tone allows understated wit about the situation while forbidding jokes at players’ expense or invented game details. School and club results are kept separate. Tone changes apply to newly generated recaps; saved recaps are not regenerated.
+
 An atomic persistent claim allows **one attempt per game**, including failures. A persistent UTC daily quota allows at most **20 attempts per Google account and 100 across the project**. Failed or quota-limited attempts do not automatically retry or regenerate. Corrected scoring histories invalidate an old recap rather than spending again. Quotas limit AI calls; they are not a cap on Firebase function/database costs. Public viewers only read saved prose and never trigger an AI call. Stopping sharing revokes access to the public recap; the owner retains their private recap.
 
 Save the server credential using Firebase's hidden prompt (never put it in Vite variables, GitHub, source files, or a browser):

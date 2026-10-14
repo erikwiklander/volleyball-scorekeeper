@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   gameFacts,
+  recapFavorites,
   generateRecap,
   createRecapProcessor,
   mirrorPublicRecap,
@@ -115,6 +116,8 @@ test('provider receives only bounded facts, no response storage, with a short pl
   assert.equal(payload.max_output_tokens, 200);
   assert.ok(!payload.input.includes('completedAt'));
   assert.ok(!payload.input.includes('ownerUid'));
+  assert.equal(JSON.parse(payload.input).periods[0].margin, 2);
+  assert.equal(JSON.parse(payload.input).periods[0].winner, 'home');
   await assert.rejects(
     generateRecap({}, 'test-key', async () => ({ ok: false })),
     /unavailable/,
@@ -213,4 +216,37 @@ test('sharing mirrors only matching completed results and removes recap when sha
   db.values.set('matches/public', { ...broadcast, published: false });
   await mirrorPublicRecap(db, 'public');
   assert.equal(db.values.has('publicRecaps/public'), false);
+});
+
+test('favorite variants get the right perspective for wins, losses and draws without matching unrelated names', () => {
+  const facts = (home, away, result = { home: 2, away: 0 }) => ({
+    home,
+    away,
+    result,
+  });
+  for (const name of ['Vandegrift Freshman', 'vandegrift JV', 'VHS']) {
+    assert.deepEqual(recapFavorites(facts('Hutto', name)), [
+      {
+        team: 'Vandegrift',
+        context: 'school volleyball',
+        side: 'away',
+        name,
+        outcome: 'loss',
+      },
+    ]);
+    assert.equal(recapFavorites(facts(name, 'Hutto'))[0].outcome, 'win');
+  }
+  for (const name of ['Roots 15-2 Blue', 'Roots15-2', 'roots']) {
+    assert.equal(recapFavorites(facts(name, 'Skyline'))[0].team, 'Roots');
+    assert.equal(
+      recapFavorites(facts(name, 'Skyline', { home: 1, away: 1 }))[0].outcome,
+      'draw',
+    );
+  }
+  assert.deepEqual(recapFavorites(facts('Grassroots', 'Rootstown')), []);
+  assert.deepEqual(recapFavorites(facts('Eagles', 'Falcons')), []);
+  assert.deepEqual(
+    recapFavorites({ ...facts('Vandegrift', 'Hutto'), sport: 'football' }),
+    [],
+  );
 });
