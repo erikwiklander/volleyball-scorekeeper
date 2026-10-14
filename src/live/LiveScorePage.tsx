@@ -87,6 +87,7 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
   );
   const current = sets.find((s) => s.setNumber === match?.currentSet);
   const football = sportOf(match) === 'football';
+  const completed = match?.status === 'completed';
   const totals = sets.reduce(
     (sum, period) => ({
       homeScore: sum.homeScore + period.homeScore,
@@ -163,10 +164,15 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
                   )}
                   <h2>{match[side].shortName || match[side].name}</h2>
                   <strong className="public-points">
-                    {(football ? totals : current)?.[
-                      side === 'home' ? 'homeScore' : 'awayScore'
-                    ] ?? 0}
+                    {!football && completed
+                      ? match.result[side]
+                      : ((football ? totals : current)?.[
+                          side === 'home' ? 'homeScore' : 'awayScore'
+                        ] ?? 0)}
                   </strong>
+                  {!football && completed && (
+                    <div className="eyebrow">Sets won</div>
+                  )}
                 </div>
               ))}
             </div>
@@ -206,7 +212,9 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
                         <th
                           key={set.setNumber}
                           className={
-                            set.setNumber === match.currentSet ? 'current' : ''
+                            !completed && set.setNumber === match.currentSet
+                              ? 'current'
+                              : ''
                           }
                         >
                           {football
@@ -226,7 +234,7 @@ export default function LiveScorePage({ publicId }: { publicId: string }) {
                           <td
                             key={set.setNumber}
                             className={
-                              set.setNumber === match.currentSet
+                              !completed && set.setNumber === match.currentSet
                                 ? 'current'
                                 : ''
                             }

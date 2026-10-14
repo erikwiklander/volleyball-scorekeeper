@@ -196,6 +196,9 @@ test('public viewer follows points, offline recovery, final results, stop and de
       fullPage: true,
     });
     await expect(viewer.locator('.public-set')).toContainText('Sets 1–1');
+    await expect(points).toHaveText(['1', '1']);
+    await expect(viewer.getByText('Sets won', { exact: true })).toHaveCount(2);
+    await expect(viewer.locator('.public-history .current')).toHaveCount(0);
     await expect(
       viewer.locator('.public-history tbody tr').first().locator('td'),
     ).toHaveText(['2', '0']);
