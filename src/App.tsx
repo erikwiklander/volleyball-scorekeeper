@@ -50,6 +50,7 @@ import {
   endSet,
   id,
   matchResult,
+  matchStartedAt,
   orderedEvents,
   scoreAction,
   setScore,
@@ -670,6 +671,7 @@ export default function App() {
     const active = data.sets.find((s) => s.matchId === m.id && !s.completedAt);
     const score = active && setScore(data, active.id);
     const result = matchResult(data, m.id);
+    const startedAt = matchStartedAt(data, m);
     return (
       <button
         className="list-card"
@@ -697,6 +699,17 @@ export default function App() {
                     ? 'Ready to start Set 1'
                     : 'Between sets · Ready to resume'}
           </small>
+          {startedAt && (
+            <small>
+              <time dateTime={startedAt}>
+                {dateLabel(startedAt)} ·{' '}
+                {new Date(startedAt).toLocaleTimeString(undefined, {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </time>
+            </small>
+          )}
         </span>
         <span aria-hidden="true">↗</span>
       </button>
@@ -706,6 +719,7 @@ export default function App() {
     ? setScore(data, currentSet.id)
     : { homeScore: 0, awayScore: 0 };
   const result = match ? matchResult(data, match.id) : undefined;
+  const startedAt = match && matchStartedAt(data, match);
   return (
     <div className={`shell ${scoring ? 'is-scoring' : ''}`}>
       <header className="brand">
@@ -1321,10 +1335,9 @@ export default function App() {
                   </div>
                 </section>
               )}
-              {match.startedAt && (
+              {startedAt && (
                 <p className="match-times">
-                  Started {dateLabel(match.startedAt)} ·{' '}
-                  {timeLabel(match.startedAt)}
+                  Started {dateLabel(startedAt)} · {timeLabel(startedAt)}
                   {match.completedAt && (
                     <>
                       {' '}

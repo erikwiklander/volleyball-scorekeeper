@@ -14,6 +14,7 @@ import {
   syncMarker,
   saveAppearance,
   matchResult,
+  matchStartedAt,
   type Snapshot,
 } from './domain';
 import { gameBackup, importBackup, matchCsv, tournamentBackup } from './export';
@@ -87,6 +88,38 @@ describe('scoring and immutable corrections', () => {
   });
 });
 describe('sets and match lifecycle', () => {
+  it('records the estimated start one minute before the first point', () => {
+    point('SYNC_MARKER', at + 1000);
+    point('HOME_POINT', at + 600_000);
+    const expected = new Date(at + 540_000).toISOString();
+    expect(data.matches[0].startedAt).toBe(expected);
+    point('UNDO', at + 601_000);
+    point('AWAY_POINT', at + 602_000);
+    endSet(data, 'm', data.sets[0].id, at + 603_000);
+    startSet(data, 'm', at + 604_000);
+    point('HOME_POINT', at + 605_000);
+    expect(data.matches[0].startedAt).toBe(expected);
+    expect(matchStartedAt(data, data.matches[0])).toBe(expected);
+    expect(data.events.find((e) => e.action === 'MATCH_STARTED')!.epochMs).toBe(
+      at,
+    );
+  });
+  it('derives older game starts from the first recorded point despite clock changes', () => {
+    point('AWAY_POINT', at + 600_000);
+    point('HOME_POINT', at - 1000);
+    data.matches[0].startedAt = new Date(at).toISOString();
+    data.events.reverse();
+    expect(matchStartedAt(data, data.matches[0])).toBe(
+      new Date(at + 540_000).toISOString(),
+    );
+  });
+  it('uses the saved start until a point is recorded', () => {
+    expect(matchStartedAt(data, data.matches[0])).toBe(
+      new Date(at).toISOString(),
+    );
+    const unstarted = fixture();
+    expect(matchStartedAt(unstarted, unstarted.matches[0])).toBeUndefined();
+  });
   it('isolates set scores and assigns events to the correct set', () => {
     const first = data.sets[0].id;
     point('HOME_POINT');

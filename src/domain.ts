@@ -202,6 +202,20 @@ export function matchResult(data: Snapshot, matchId: string) {
       { home: 0, away: 0, tied: 0 },
     );
 }
+// Include undone points: corrections do not change when play first began.
+// Deriving this also gives older saved games the same estimated start time.
+export function matchStartedAt(data: Snapshot, match: Match) {
+  const firstPoint = data.events
+    .filter(
+      (e) =>
+        e.matchId === match.id &&
+        (e.action === 'HOME_POINT' || e.action === 'AWAY_POINT'),
+    )
+    .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))[0];
+  return firstPoint
+    ? new Date(firstPoint.epochMs - 60_000).toISOString()
+    : match.startedAt;
+}
 export function appendEvent(
   data: Snapshot,
   match: Match,
@@ -234,6 +248,8 @@ export function appendEvent(
       Math.max(markers.length, ...markers.map((e) => e.syncNumber ?? 0)) + 1;
   }
   data.events.push(event);
+  if (action === 'HOME_POINT' || action === 'AWAY_POINT')
+    match.startedAt = matchStartedAt(data, match);
   Object.assign(
     event,
     sportOf(match) === 'football'

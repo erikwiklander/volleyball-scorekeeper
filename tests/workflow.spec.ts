@@ -288,11 +288,25 @@ test('one-off game needs no tournament and supports recovery, completion and bac
   await page.getByRole('button', { name: 'Export game backup' }).click();
   const bytes = await readFile((await (await backupDownload).path())!);
   expect(JSON.parse(bytes.toString()).tournament).toBeUndefined();
+  const backup = JSON.parse(bytes.toString());
+  const firstPoint = backup.events.find(
+    (event: { action: string }) =>
+      event.action === 'HOME_POINT' || event.action === 'AWAY_POINT',
+  );
+  const estimatedStart = new Date(firstPoint.epochMs - 60_000).toISOString();
+  expect(backup.matches[0].startedAt).toBe(estimatedStart);
   await page.getByRole('button', { name: 'All games' }).click();
   await expect(
     page.getByRole('heading', { name: 'Your games 1' }),
   ).toBeVisible();
   await expect(page.getByText('Tournaments (optional) · 0')).toBeVisible();
+  const gameTime = page.locator('.match-list time');
+  await expect(gameTime).toHaveAttribute('datetime', estimatedStart);
+  const expectedDateTime = await page.evaluate((value) => {
+    const date = new Date(value);
+    return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  }, estimatedStart);
+  await expect(gameTime).toHaveText(expectedDateTime);
   await page.screenshot({
     path: testInfo.outputPath('one-off-home.png'),
     fullPage: true,
