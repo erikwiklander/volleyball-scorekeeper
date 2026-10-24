@@ -1,3 +1,4 @@
+import { syncRetry } from '../syncRetry';
 import type { IDBPDatabase } from 'idb';
 import { mutate, readSnapshot } from '../db';
 import { liveConfig } from '../live/config';
@@ -44,15 +45,6 @@ function report(
   status = { phase, message, ownerUid, ready };
   listeners.forEach((listener) => listener());
 }
-function bounded<T>(promise: Promise<T>) {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(
-      () => reject(new Error('Cloud sync timed out.')),
-      20_000,
-    );
-    promise.then(resolve, reject).finally(() => window.clearTimeout(timer));
-  });
-}
 export function startLibraryWorker(db: IDBPDatabase) {
   if (!liveConfig()) return { wake() {}, stop() {} };
   let stopped = false,
@@ -66,6 +58,7 @@ export function startLibraryWorker(db: IDBPDatabase) {
     stopConnection: (() => void) | undefined;
   let stopRemote: (() => void)[] = [];
   const ready = new Set<LibraryKind>();
+  const backoff = syncRetry();
   const channel =
     typeof BroadcastChannel !== 'undefined'
       ? new BroadcastChannel('volleyball-scorekeeper')
@@ -74,10 +67,9 @@ export function startLibraryWorker(db: IDBPDatabase) {
     if (stopped) return;
     channel?.postMessage('changed');
     window.dispatchEvent(new Event('library-sync'));
-    window.dispatchEvent(new Event('live-auth-change'));
   };
   async function wake() {
-    if (stopped || !ownerUid || !api) return;
+    if (stopped || !ownerUid || !api || !backoff.ready()) return;
     if (running) {
       again = true;
       return;
@@ -104,16 +96,21 @@ export function startLibraryWorker(db: IDBPDatabase) {
           (await readSnapshot(db)).libraryQueue.some((e) => e.ownerUid === uid)
         ) {
           report('syncing', 'Backing up games and tournaments…', uid, true);
-          await flushLibraryQueue(
+          const advanced = await flushLibraryQueue(
             db,
             uid,
             {
               publishLibrary: (entry, deviceId) =>
-                bounded(api!.publishLibrary(entry, deviceId)),
+                api!.publishLibrary(entry, deviceId),
             },
             notify,
             isCurrent,
           );
+          if (!advanced) {
+            again = false;
+            break;
+          }
+          backoff.reset();
         }
         if (!isCurrent()) break;
         again = (await readSnapshot(db)).libraryQueue.some(
@@ -123,19 +120,23 @@ export function startLibraryWorker(db: IDBPDatabase) {
           report('synced', 'Games and tournaments are synced.', uid, true);
       } while (again && isCurrent());
     } catch {
-      if (isCurrent())
+      if (isCurrent()) {
+        backoff.fail();
+        again = false;
         report(
           'error',
           'Cloud backup is pending. Your games are safe on this device.',
           uid,
           ready.size === 2,
         );
+      }
     } finally {
       running = false;
-      if (again && !stopped) void wake();
+      if (again && !stopped && backoff.ready()) void wake();
     }
   }
   async function bind(uid?: string) {
+    backoff.reset();
     const currentGeneration = ++generation;
     const isCurrent = () => !stopped && generation === currentGeneration;
     stopRemote.forEach((stop) => stop());
@@ -239,8 +240,11 @@ export function startLibraryWorker(db: IDBPDatabase) {
       api = await import('../live/firebase');
       if (stopped) return;
       stopConnection = api.watchConnection((value) => {
+        const recovered = value && !connected;
         connected = value;
-        void wake();
+        if (recovered) backoff.reset();
+        if (recovered && ownerUid && ready.size !== 2) void bind(ownerUid);
+        else void wake();
       });
       stopAuth = api.watchPublisher(
         (user) =>
@@ -263,6 +267,7 @@ export function startLibraryWorker(db: IDBPDatabase) {
     }
   }
   const retry = () => {
+    backoff.reset();
     if (api) void bind(ownerUid);
     else void initialize();
   };
@@ -270,7 +275,13 @@ export function startLibraryWorker(db: IDBPDatabase) {
     if (document.visibilityState === 'visible') void wake();
   };
   const timer = window.setInterval(() => void wake(), 10_000);
-  window.addEventListener('online', wake);
+  const online = () => {
+    backoff.reset();
+    if (ownerUid && ready.size !== 2) retry();
+    else void wake();
+  };
+  window.addEventListener('online', online);
+  window.addEventListener('sync-retry', retry);
   window.addEventListener('library-retry', retry);
   document.addEventListener('visibilitychange', visible);
   if (channel) channel.onmessage = () => void wake();
@@ -284,7 +295,8 @@ export function startLibraryWorker(db: IDBPDatabase) {
       stopConnection?.();
       stopRemote.forEach((stop) => stop());
       window.clearInterval(timer);
-      window.removeEventListener('online', wake);
+      window.removeEventListener('online', online);
+      window.removeEventListener('sync-retry', retry);
       window.removeEventListener('library-retry', retry);
       document.removeEventListener('visibilitychange', visible);
       channel?.close();

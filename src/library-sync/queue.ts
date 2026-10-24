@@ -15,6 +15,7 @@ export async function flushLibraryQueue(
   notify: () => void,
   isCurrent: () => boolean,
 ) {
+  let advanced = 0;
   const entries = (await readSnapshot(db)).libraryQueue.filter(
     (e) => e.ownerUid === ownerUid,
   );
@@ -36,10 +37,21 @@ export async function flushLibraryQueue(
             entry.recordId,
             ownerUid,
             remote,
+            { confirmedServer: true },
           );
       },
       { queueLibrary: false, queueLive: false, queueTeams: false },
     );
+    const remaining = (await readSnapshot(db)).libraryQueue.find(
+      (e) => e.id === entry.id,
+    );
+    if (
+      remaining?.mutationId === entry.mutationId &&
+      remaining.revision === entry.revision
+    )
+      throw new Error('Cloud backup has not acknowledged this update.');
+    advanced++;
     notify();
   }
+  return advanced;
 }

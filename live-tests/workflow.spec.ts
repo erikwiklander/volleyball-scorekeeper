@@ -128,10 +128,35 @@ test('public viewer follows points, offline recovery, final results, stop and de
     await expect(metric('Watching now')).toHaveText('1');
     await expect(metric('Peak watching live')).toHaveText('1');
     await expect(metric('Total viewers')).toHaveText('1');
+    // The server accepts a backup, but its HTTP acknowledgement is lost.
+    let lostAcknowledgement = false;
+    await context.route('http://127.0.0.1:9000/**', async (route) => {
+      const request = route.request();
+      if (
+        !lostAcknowledgement &&
+        request.method() === 'PUT' &&
+        new URL(request.url()).pathname.includes('/games/')
+      ) {
+        const body = request.postDataJSON();
+        if (
+          body?.payload &&
+          JSON.parse(body.payload).events.some(
+            (event: { action: string }) => event.action === 'HOME_POINT',
+          )
+        ) {
+          lostAcknowledgement = true;
+          await route.fetch();
+          await route.abort('failed');
+          return;
+        }
+      }
+      await route.continue();
+    });
     const home = page.getByRole('button', { name: 'Add point for Eagles' });
     await home.click();
     const points = viewer.locator('.public-points');
     await expect(points).toHaveText(['1', '0']);
+    expect(lostAcknowledgement).toBe(true);
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Sign in with Google', exact: true }),
@@ -175,8 +200,36 @@ test('public viewer follows points, offline recovery, final results, stop and de
         .click();
     }
     await page.getByRole('button', { name: 'Start Set 2' }).click();
+    // Keep navigator.onLine and the Firebase listener connected while writes
+    // fail: this reproduces shaky internet rather than a clean offline switch.
+    let failWrites = true;
+    let failedWrites = 0;
+    await context.route('http://127.0.0.1:9000/**', async (route) => {
+      if (failWrites && route.request().method() === 'PUT') {
+        failedWrites++;
+        await route.abort('failed');
+      } else await route.continue();
+    });
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        syncMessages: string[];
+        syncObserver: MutationObserver;
+      };
+      state.syncMessages = [];
+      state.syncObserver = new MutationObserver(() => {
+        const message =
+          document.querySelector('.live-controls > p:nth-of-type(2)')
+            ?.textContent ?? '';
+        if (message !== state.syncMessages.at(-1))
+          state.syncMessages.push(message);
+      });
+      state.syncObserver.observe(document.querySelector('.live-controls')!, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    });
     await page.getByRole('button', { name: 'Add point for Falcons' }).click();
-    await expect(points).toHaveText(['0', '1']);
     await endSet();
     await page
       .getByRole('button', { name: 'Complete match', exact: true })
@@ -185,6 +238,27 @@ test('public viewer follows points, offline recovery, final results, stop and de
       .getByRole('dialog')
       .getByRole('button', { name: 'Complete match', exact: true })
       .click();
+    await expect(page.locator('.final-score')).toBeVisible();
+    expect(await page.evaluate(() => navigator.onLine)).toBe(true);
+    await page.waitForTimeout(2200); // Observe a retry storm, if one exists.
+    expect(failedWrites).toBeGreaterThan(0);
+    expect(failedWrites).toBeLessThan(5);
+    const syncMessages = await page.evaluate(() => {
+      const state = window as unknown as {
+        syncMessages: string[];
+        syncObserver: MutationObserver;
+      };
+      state.syncObserver.disconnect();
+      return state.syncMessages;
+    });
+    expect(syncMessages.length).toBeLessThan(8);
+    await expect(viewer.getByText('FINAL', { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Retry sync', exact: true }),
+    ).toBeVisible();
+    // No reload, online event, new score, or Retry sync click: recovery must
+    // publish the completed match on its own as soon as requests work again.
+    failWrites = false;
     await expect(viewer.getByText('FINAL', { exact: true })).toBeVisible();
     await expect(metric('Watching now')).toHaveText('0');
     await expect(metric('Viewed while live')).toHaveText('1');

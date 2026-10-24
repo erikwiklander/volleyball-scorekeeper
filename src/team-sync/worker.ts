@@ -1,3 +1,4 @@
+import { syncRetry } from '../syncRetry';
 import type { IDBPDatabase } from 'idb';
 import { mutate, readSnapshot } from '../db';
 import { liveConfig } from '../live/config';
@@ -36,6 +37,7 @@ function bounded<T>(promise: Promise<T>): Promise<T> {
 }
 export function startTeamWorker(db: IDBPDatabase) {
   if (!liveConfig()) return { wake() {}, stop() {} };
+  const backoff = syncRetry();
   let stopped = false;
   let generation = 0;
   let ownerUid: string | undefined;
@@ -57,7 +59,7 @@ export function startTeamWorker(db: IDBPDatabase) {
     window.dispatchEvent(new Event('team-sync'));
   };
   async function wake() {
-    if (stopped || !ownerUid || !api) return;
+    if (stopped || !ownerUid || !api || !backoff.ready()) return;
     if (running) {
       again = true;
       return;
@@ -96,6 +98,7 @@ export function startTeamWorker(db: IDBPDatabase) {
           isCurrent,
         );
         if (!isCurrent()) break;
+        backoff.reset();
         again = (await readSnapshot(db)).teamQueue.some(
           (entry) => entry.ownerUid === uid,
         );
@@ -111,17 +114,21 @@ export function startTeamWorker(db: IDBPDatabase) {
       )
         report('synced', 'Teams are synced.');
     } catch {
-      if (isCurrent())
+      if (isCurrent()) {
+        backoff.fail();
+        again = false;
         report(
           'error',
           'Team sync is pending. Your teams are saved on this device.',
         );
+      }
     } finally {
       running = false;
-      if (again && !stopped) void wake();
+      if (again && !stopped && backoff.ready()) void wake();
     }
   }
   async function bind(uid?: string) {
+    backoff.reset();
     const currentGeneration = ++generation;
     const isCurrent = () => !stopped && generation === currentGeneration;
     stopRemote?.();
@@ -199,8 +206,11 @@ export function startTeamWorker(db: IDBPDatabase) {
       api = await import('../live/firebase');
       if (stopped) return;
       stopConnection = api.watchConnection((value) => {
+        const recovered = value && !connected;
         connected = value;
-        void wake();
+        if (recovered) backoff.reset();
+        if (recovered && ownerUid && !ready) void bind(ownerUid);
+        else void wake();
       });
       stopAuth = api.watchPublisher((user) => {
         const uid =
@@ -222,6 +232,7 @@ export function startTeamWorker(db: IDBPDatabase) {
     }
   }
   const retry = () => {
+    backoff.reset();
     if (api) void bind(ownerUid);
     else void initialize();
   };
@@ -229,7 +240,13 @@ export function startTeamWorker(db: IDBPDatabase) {
     if (document.visibilityState === 'visible') void wake();
   };
   const timer = window.setInterval(() => void wake(), 10_000);
-  window.addEventListener('online', wake);
+  const online = () => {
+    backoff.reset();
+    if (ownerUid && !ready) retry();
+    else void wake();
+  };
+  window.addEventListener('online', online);
+  window.addEventListener('sync-retry', retry);
   window.addEventListener('team-sync-retry', retry);
   document.addEventListener('visibilitychange', visible);
   if (channel) channel.onmessage = () => void wake();
@@ -243,7 +260,8 @@ export function startTeamWorker(db: IDBPDatabase) {
       stopConnection?.();
       stopRemote?.();
       window.clearInterval(timer);
-      window.removeEventListener('online', wake);
+      window.removeEventListener('online', online);
+      window.removeEventListener('sync-retry', retry);
       window.removeEventListener('team-sync-retry', retry);
       document.removeEventListener('visibilitychange', visible);
       channel?.close();

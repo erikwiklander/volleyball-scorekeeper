@@ -451,3 +451,102 @@ it('public flushing never rebinds a removed stale snapshot to a new scorer epoch
   expect(uploads).toBe(1);
   db.close();
 });
+
+it('a confirmed server read repairs an optimistic revision without losing offline points', async () => {
+  const { db, match, remote } = await fixture(true);
+  await mutate(db, (d) => startSet(d, match.id, Date.parse(time)));
+  const set = (await readSnapshot(db)).sets[0];
+  await mutate(db, (d) =>
+    scoreAction(d, match.id, set.id, 'AWAY_POINT', Date.parse(time) + 1),
+  );
+  await mutate(
+    db,
+    (d) => {
+      libraryLink(d, 'games', match.id)!.revision = 9;
+      d.libraryQueue[0].revision = 9;
+    },
+    { queueLibrary: false, queueLive: false },
+  );
+  await mutate(
+    db,
+    (d) => applyLibraryRecord(d, 'games', match.id, 'owner', remote),
+    { queueLibrary: false, queueLive: false },
+  );
+  expect((await readSnapshot(db)).libraryQueue[0].revision).toBe(9);
+  await flushLibraryQueue(
+    db,
+    'owner',
+    { publishLibrary: async () => remote },
+    () => {},
+    () => true,
+  );
+  expect((await readSnapshot(db)).libraryQueue[0].revision).toBe(
+    remote.revision,
+  );
+  await flushLibraryQueue(
+    db,
+    'owner',
+    { publishLibrary: async (e, device) => record(e, device) },
+    () => {},
+    () => true,
+  );
+  const saved = await readSnapshot(db);
+  expect(saved.libraryQueue).toHaveLength(0);
+  expect(setScore(saved, set.id)).toEqual({ homeScore: 0, awayScore: 1 });
+  db.close();
+});
+it('a stale backup response with no forward progress leaves the queue and stops the drain', async () => {
+  const { db, match, remote } = await fixture(true);
+  await mutate(db, (d) => startSet(d, match.id, Date.parse(time)));
+  const before = await readSnapshot(db);
+  await expect(
+    flushLibraryQueue(
+      db,
+      'owner',
+      { publishLibrary: async () => ({ ...remote, mutationId: id() }) },
+      () => {},
+      () => true,
+    ),
+  ).rejects.toThrow('not acknowledged');
+  expect((await readSnapshot(db)).libraryQueue[0].payload).toEqual(
+    before.libraryQueue[0].payload,
+  );
+  db.close();
+});
+
+it('a confirmed newer scorer epoch fences an optimistic local revision and preserves a conflict copy', async () => {
+  const { db, match, remote } = await fixture(true);
+  await mutate(db, (d) => startSet(d, match.id, Date.parse(time)));
+  await mutate(
+    db,
+    (d) => {
+      libraryLink(d, 'games', match.id)!.revision = 9;
+      d.libraryQueue[0].revision = 9;
+    },
+    { queueLibrary: false, queueLive: false },
+  );
+  const nextDevice = id();
+  const takeover = {
+    ...remote,
+    revision: 2,
+    mutationId: id(),
+    deviceId: nextDevice,
+    scorerDeviceId: nextDevice,
+    scorerEpoch: 2,
+  };
+  await flushLibraryQueue(
+    db,
+    'owner',
+    { publishLibrary: async () => takeover },
+    () => {},
+    () => true,
+  );
+  const after = await readSnapshot(db);
+  expect(canScoreGame(after, match.id)).toBe(false);
+  expect(after.matches.some((m) => m.homeTeam.includes('saved copy'))).toBe(
+    true,
+  );
+  expect(after.libraryQueue.some((e) => e.recordId === match.id)).toBe(false);
+  expect(after.syncQueue.some((e) => e.matchId === match.id)).toBe(false);
+  db.close();
+});

@@ -329,12 +329,35 @@ export function applyLibraryRecord(
   recordId: string,
   ownerUid: string,
   remote: LibraryRecord,
+  { confirmedServer = false }: { confirmedServer?: boolean } = {},
 ) {
   const payload = parseLibraryPayload(kind, recordId, remote);
   let link = libraryLink(data, kind, recordId);
   if (link && link.ownerUid !== ownerUid)
     throw new Error('Record belongs to another cached account.');
-  if (link && remote.revision < link.revision) return;
+  const confirmedTakeover =
+    confirmedServer &&
+    kind === 'games' &&
+    (remote.scorerEpoch ?? 0) > (link?.scorerEpoch ?? 0);
+  if (link && remote.revision < link.revision && !confirmedTakeover) {
+    // An offline SDK transaction may previously have advanced local metadata
+    // without a server acknowledgement. Only a fresh REST read may repair that
+    // base, and only for this device's unchanged scorer epoch. Never roll back
+    // the saved scoring history or trust a lower cached listener snapshot.
+    const pending = data.libraryQueue.find((e) => e.id === link!.id);
+    if (
+      confirmedServer &&
+      kind === 'games' &&
+      pending &&
+      remote.scorerDeviceId === data.teamSync.deviceId &&
+      pending.scorerDeviceId === remote.scorerDeviceId &&
+      pending.scorerEpoch === remote.scorerEpoch
+    ) {
+      link.revision = remote.revision;
+      pending.revision = remote.revision;
+    }
+    return;
+  }
   if (!link) {
     link = {
       id: libraryKey(kind, recordId),
@@ -368,7 +391,15 @@ export function applyLibraryRecord(
       pending.revision = remote.revision;
       return;
     }
-    if (pending.revision >= remote.revision) return;
+    if (
+      pending.revision >= remote.revision &&
+      !(
+        confirmedServer &&
+        kind === 'games' &&
+        (remote.scorerEpoch ?? 0) > (pending.scorerEpoch ?? 0)
+      )
+    )
+      return;
     if (pending.payload) {
       if (kind === 'games')
         saveGameCopy(

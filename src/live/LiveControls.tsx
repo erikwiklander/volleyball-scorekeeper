@@ -180,6 +180,14 @@ export default function LiveControls({
                         ? status || 'Saved here. Live update pending…'
                         : 'The latest saved score is published.'}
               </p>
+              {pending && ownsLink && !viewOnly && (
+                <button
+                  disabled={busy || !online}
+                  onClick={() => api?.retrySync()}
+                >
+                  Retry sync
+                </button>
+              )}
               <div className="toolbar">
                 <button
                   onClick={async () => {

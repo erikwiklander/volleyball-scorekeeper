@@ -1,3 +1,4 @@
+import { createDatabaseRest } from './rest';
 import { initializeApp } from 'firebase/app';
 import {
   connectAuthEmulator,
@@ -13,6 +14,8 @@ import {
 import {
   connectDatabaseEmulator,
   getDatabase,
+  goOffline,
+  goOnline,
   get,
   onValue,
   ref,
@@ -88,15 +91,25 @@ export async function publisherIdentity() {
     throw new Error('Sign in with Google to publish pending scores.');
   return user.uid;
 }
+const rest = createDatabaseRest({
+  databaseURL: config!.databaseURL!,
+  emulator,
+  credentials: async () => {
+    const uid = await publisherIdentity();
+    return { uid, token: await publishingAuth().currentUser!.getIdToken() };
+  },
+});
+export function retrySync() {
+  goOffline(database);
+  goOnline(database);
+  window.dispatchEvent(new Event('sync-retry'));
+}
 export async function publish(entry: SyncEntry) {
-  if ((await publisherIdentity()) !== entry.ownerUid)
-    throw new Error(
-      'The original publishing identity is unavailable in this browser.',
-    );
   if (entry.gameId) {
-    const game = (
-      await get(ref(database, `users/${entry.ownerUid}/games/${entry.gameId}`))
-    ).val();
+    const game = (await rest.read(
+      `users/${entry.ownerUid}/games/${entry.gameId}`,
+      entry.ownerUid,
+    )) as { scorerDeviceId?: string; scorerEpoch?: number } | null;
     if (
       !game ||
       game.scorerDeviceId !== entry.scorerDeviceId ||
@@ -104,10 +117,11 @@ export async function publish(entry: SyncEntry) {
     )
       throw new Error('Another device controls this live game.');
   }
-  await runTransaction(
-    ref(database, `matches/${entry.id}`),
+  const result = await rest.update(
+    `matches/${entry.id}`,
+    entry.ownerUid,
     (current) => {
-      if (current && current.ownerUid !== entry.ownerUid) return; // Rules also enforce ownership.
+      if (current && current.ownerUid !== entry.ownerUid) return;
       if (current && current.revision >= entry.revision) return;
       return {
         schemaVersion: 1,
@@ -125,16 +139,14 @@ export async function publish(entry: SyncEntry) {
           : {}),
       };
     },
-    { applyLocally: false },
-  ).then((result) => {
-    const current = result.snapshot.val();
-    if (
-      !current ||
-      current.ownerUid !== entry.ownerUid ||
-      current.revision < entry.revision
-    )
-      throw new Error('Live score update was not accepted.');
-  });
+  );
+  const current = result.value;
+  if (
+    !current ||
+    current.ownerUid !== entry.ownerUid ||
+    current.revision < entry.revision
+  )
+    throw new Error('Live score update was not accepted.');
 }
 export function watchLibrary(
   ownerUid: string,
@@ -149,8 +161,6 @@ export function watchLibrary(
   );
 }
 export async function publishLibrary(entry: LibraryEntry, deviceId: string) {
-  if ((await publisherIdentity()) !== entry.ownerUid)
-    throw new Error('Sign in with the library owner’s account.');
   const checked = libraryRecordSchema.parse({
     schemaVersion: 1,
     revision: entry.revision + 1,
@@ -163,22 +173,6 @@ export async function publishLibrary(entry: LibraryEntry, deviceId: string) {
     scorerEpoch: entry.scorerEpoch,
   });
   parseLibraryPayload(entry.kind, entry.recordId, checked);
-  const target = ref(
-    database,
-    `users/${entry.ownerUid}/${entry.kind}/${entry.recordId}`,
-  );
-  const latest = (await get(target)).val();
-  if (
-    latest &&
-    (latest.mutationId === entry.mutationId ||
-      latest.revision !== entry.revision ||
-      (entry.kind === 'games' &&
-        (latest.scorerDeviceId !== entry.scorerDeviceId ||
-          latest.scorerEpoch !== entry.scorerEpoch)))
-  )
-    return libraryRecordSchema.parse(latest);
-  if (!latest && entry.revision > 0)
-    throw new Error('Cloud record unavailable.');
   const payload = {
     schemaVersion: 1,
     revision: entry.revision + 1,
@@ -191,8 +185,9 @@ export async function publishLibrary(entry: LibraryEntry, deviceId: string) {
       ? { scorerDeviceId: entry.scorerDeviceId, scorerEpoch: entry.scorerEpoch }
       : {}),
   };
-  const result = await runTransaction(
-    target,
+  const result = await rest.update(
+    `users/${entry.ownerUid}/${entry.kind}/${entry.recordId}`,
+    entry.ownerUid,
     (current) => {
       if (
         current &&
@@ -203,13 +198,14 @@ export async function publishLibrary(entry: LibraryEntry, deviceId: string) {
               current.scorerEpoch !== entry.scorerEpoch)))
       )
         return;
-      if (!current && entry.revision > 0) return;
+      if (!current && entry.revision > 0)
+        throw new Error('Cloud record unavailable.');
       return payload;
     },
-    { applyLocally: false },
   );
-  return libraryRecordSchema.parse(result.snapshot.val());
+  return libraryRecordSchema.parse(result.value);
 }
+
 export async function takeOverGame(
   ownerUid: string,
   gameId: string,

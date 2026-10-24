@@ -11,6 +11,7 @@ export async function flushQueue(
   db: IDBPDatabase,
   transport: LiveTransport,
   onSaved: () => void = () => {},
+  onSending: () => void = () => {},
 ) {
   let sent = 0;
   const entries = (await readSnapshot(db)).syncQueue;
@@ -19,6 +20,8 @@ export async function flushQueue(
     const current = state.syncQueue.find((queued) => queued.id === entry.id);
     if (!current) continue;
     entry = current;
+    if (state.teamSync.ownerUid && entry.ownerUid !== state.teamSync.ownerUid)
+      continue;
     const link = libraryLink(state, 'games', entry.matchId);
     if (link) {
       if (
@@ -29,6 +32,7 @@ export async function flushQueue(
       )
         continue;
     }
+    onSending();
     await transport.publish(entry);
     await mutate(
       db,
