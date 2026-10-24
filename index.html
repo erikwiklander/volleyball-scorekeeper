@@ -2,6 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // A cached app shell can also be opened through a shared live link.
+      // Set its base before the browser loads relative scripts and styles.
+      if (
+        /\/live\/[a-zA-Z0-9_-]{1,128}\/?$/.test(location.pathname) &&
+        !document.querySelector('base')
+      ) {
+        const base = document.createElement('base');
+        base.href = location.pathname.replace(/live\/[^/]+\/?$/, '');
+        document.head.append(base);
+      }
+    </script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"

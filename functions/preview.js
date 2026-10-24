@@ -88,6 +88,47 @@ export function cachedMetadata(
     return value;
   };
 }
+// Old cached shells may request deleted entry files, sometimes under /live/assets.
+// Bootstrap this deployment instead; never alias arbitrary chunks to an entry point.
+export function legacyAsset(shell, path) {
+  const match = path.match(
+    /^\/(?:live\/)?assets\/index-[a-zA-Z0-9_-]+\.(js|css)$/,
+  );
+  if (!match) return;
+  const styles = [
+    ...shell.matchAll(
+      /<link\b[^>]*rel="stylesheet"[^>]*href="([^"<>]+)"[^>]*>/g,
+    ),
+  ].map((match) => new URL(match[1], 'https://scorekeeper.example/').pathname);
+  if (match[1] === 'css') {
+    return {
+      type: 'css',
+      body: styles
+        .map((href) => `@import url(${JSON.stringify(href)});`)
+        .join('\n'),
+    };
+  }
+  const entry = shell.match(/<script\b[^>]*type="module"[^>]*src="([^"<>]+)"/);
+  if (!entry) return;
+  const src = new URL(entry[1], 'https://scorekeeper.example/').pathname;
+  return {
+    type: 'js',
+    body: `// Recover an older cached live viewer without clearing any saved data.
+const base = document.querySelector('base') || document.createElement('base');
+base.href = '/';
+document.head.prepend(base);
+for (const href of ${JSON.stringify(styles)}) {
+  if (![...document.querySelectorAll('link[rel="stylesheet"]')].some(link => new URL(link.href).pathname === href)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.append(link);
+  }
+}
+await import(${JSON.stringify(src)});
+`,
+  };
+}
 export function createPreviewHandler({ readMetadata, shell, origin }) {
   origin = new URL(origin).origin;
   return async (request, response) => {
@@ -100,6 +141,11 @@ export function createPreviewHandler({ readMetadata, shell, origin }) {
     }
     const requested = new URL(request.originalUrl, origin);
     const path = requested.pathname;
+    const recovery = legacyAsset(shell, path);
+    if (recovery) {
+      response.type(recovery.type).status(200).send(recovery.body);
+      return;
+    }
     const route = path.match(
       /^\/live\/([a-zA-Z0-9_-]{1,128})(?:\/(matchup\.png))?\/?$/,
     );

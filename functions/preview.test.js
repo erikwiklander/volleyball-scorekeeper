@@ -202,3 +202,43 @@ test('errors and throttled requests return uncached generic viewer HTML', async 
     assert.ok(res.body.includes('./assets/app.js'));
   }
 });
+
+test('legacy entry assets recover without metadata lookups or caching old filenames', async () => {
+  let calls = 0;
+  const handler = createPreviewHandler({
+    shell:
+      '<head><script type="module" src="./assets/index-current.js"></script><link rel="stylesheet" href="./assets/index-current.css"></head>',
+    origin,
+    readMetadata: async () => {
+      calls++;
+      return metadata;
+    },
+  });
+  for (const prefix of ['/live/assets/', '/assets/']) {
+    const js = response();
+    await handler(
+      { method: 'GET', originalUrl: prefix + 'index-k_vyf0Us.js' },
+      js,
+    );
+    assert.equal(js.code, 200);
+    assert.equal(js.contentType, 'js');
+    assert.equal(js.headers['Cache-Control'], 'no-store');
+    assert.ok(js.body.includes('await import("/assets/index-current.js")'));
+    assert.ok(js.body.includes('"/assets/index-current.css"'));
+    assert.ok(js.body.includes("base.href = '/'"));
+    const css = response();
+    await handler(
+      { method: 'GET', originalUrl: prefix + 'index-C8Z-HsZ9.css' },
+      css,
+    );
+    assert.equal(css.contentType, 'css');
+    assert.equal(css.body, '@import url("/assets/index-current.css");');
+  }
+  const chunk = response();
+  await handler(
+    { method: 'GET', originalUrl: '/live/assets/firebase-old.js' },
+    chunk,
+  );
+  assert.equal(chunk.code, 404);
+  assert.equal(calls, 0);
+});

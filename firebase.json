@@ -10,7 +10,16 @@
         "source": "/live/**",
         "function": {
           "functionId": "livePreview",
-          "region": "us-central1"
+          "region": "us-central1",
+          "pinTag": true
+        }
+      },
+      {
+        "source": "/assets/**",
+        "function": {
+          "functionId": "livePreview",
+          "region": "us-central1",
+          "pinTag": true
         }
       },
       {
