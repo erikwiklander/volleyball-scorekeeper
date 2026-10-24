@@ -77,6 +77,9 @@ test('full history syncs automatically; transfer keeps the live URL and protects
   await page.getByRole('button', { name: '+ New match', exact: true }).click();
   await page.getByLabel('Home team', { exact: true }).fill('Sync Eagles');
   await page.getByLabel('Away team', { exact: true }).fill('Sync Falcons');
+  await page
+    .getByLabel('Game context (optional)', { exact: true })
+    .fill('First game for this school team.');
   await page.getByRole('button', { name: 'Create match', exact: true }).click();
   await page.getByRole('button', { name: 'Start Set 1', exact: true }).click();
   await page
@@ -101,6 +104,13 @@ test('full history syncs automatically; transfer keeps the live URL and protects
       exact: true,
     });
     await expect(secondHome.locator('.score')).toHaveText('1');
+    await second.locator('.game-context summary').click();
+    await expect(
+      second.getByLabel('Context for the AI recap', { exact: true }),
+    ).toHaveValue('First game for this school team.');
+    await expect(
+      second.getByLabel('Context for the AI recap', { exact: true }),
+    ).not.toBeEditable();
     await expect(secondHome).toBeDisabled();
     await expect(
       second.getByRole('button', { name: 'Take over scoring', exact: true }),
@@ -154,6 +164,9 @@ test('full history syncs automatically; transfer keeps the live URL and protects
       .getByRole('button', { name: 'Take over scoring', exact: true })
       .click();
     await expect(secondHome).toBeEnabled();
+    await expect(
+      second.getByLabel('Context for the AI recap', { exact: true }),
+    ).toBeEditable();
     await second
       .getByRole('button', { name: 'Add point for Sync Falcons', exact: true })
       .click();

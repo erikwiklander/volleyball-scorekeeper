@@ -508,8 +508,24 @@ it('a stale backup response with no forward progress leaves the queue and stops 
       () => true,
     ),
   ).rejects.toThrow('not acknowledged');
-  expect((await readSnapshot(db)).libraryQueue[0].payload).toEqual(
-    before.libraryQueue[0].payload,
+  const original = JSON.parse(before.libraryQueue[0].payload!);
+  const preserved = JSON.parse(
+    (await readSnapshot(db)).libraryQueue[0].payload!,
+  );
+  expect(preserved.match).toEqual(original.match);
+  expect(preserved.sets).toEqual(original.sets);
+  expect(preserved.broadcast).toEqual(original.broadcast);
+  // IndexedDB reads by ID; event array order is not scoring history order.
+  expect(
+    preserved.events.sort(
+      (a: { sequence: number }, b: { sequence: number }) =>
+        a.sequence - b.sequence,
+    ),
+  ).toEqual(
+    original.events.sort(
+      (a: { sequence: number }, b: { sequence: number }) =>
+        a.sequence - b.sequence,
+    ),
   );
   db.close();
 });

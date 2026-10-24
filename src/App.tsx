@@ -44,6 +44,8 @@ import type { IDBPDatabase } from 'idb';
 import {
   activePoints,
   completeMatch,
+  setGameContext,
+  MAX_GAME_CONTEXT_LENGTH,
   deleteMatch,
   deleteTeam,
   emptySnapshot,
@@ -107,6 +109,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [logoLoading, setLogoLoading] = useState(false);
   const saving = useRef(false);
+  const contextDrafts = useRef(new Map<string, string>());
+  const [contextEdits, setContextEdits] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [page, setPage] = useState<Page>({ kind: 'home' });
@@ -297,13 +301,41 @@ export default function App() {
       window.removeEventListener('beforeunload', unload);
     };
   }, [scoring, match?.id]);
+  function editGameContext(matchId: string, value: string) {
+    contextDrafts.current.set(matchId, value);
+    setError('');
+    setContextEdits((n) => n + 1);
+  }
+  useEffect(() => {
+    if (busy || error || !contextDrafts.current.size) return;
+    const timer = window.setTimeout(() => void commit(() => {}), 500);
+    return () => window.clearTimeout(timer);
+  }, [contextEdits, busy, error]);
   async function commit(change: (draft: Snapshot) => void, after?: () => void) {
     if (!db.current || saving.current) return;
     saving.current = true;
     setBusy(true);
     setError('');
     try {
-      const next = await mutate(db.current, change);
+      const pendingContexts = [...contextDrafts.current];
+      const next = await mutate(db.current, (draft) => {
+        // Flush typed context in the SAME transaction as completion or a point,
+        // so closing quickly cannot generate a recap from an older note.
+        for (const [matchId, value] of pendingContexts) {
+          const game = draft.matches.find((m) => m.id === matchId);
+          if (
+            game &&
+            game.status !== 'completed' &&
+            canScoreGame(draft, matchId) &&
+            (game.recapContext ?? '') !== value
+          )
+            setGameContext(draft, matchId, value, Date.now());
+        }
+        change(draft);
+      });
+      for (const [matchId, value] of pendingContexts)
+        if (contextDrafts.current.get(matchId) === value)
+          contextDrafts.current.delete(matchId);
       setData(next);
       channel.current?.postMessage('changed');
       void liveWorker.current?.wake();
@@ -589,6 +621,7 @@ export default function App() {
             createdAt: now,
             updatedAt: now,
           });
+          setGameContext(d, matchId, value('recapContext'), Date.parse(now));
           d.appState = {
             id: 'current',
             activeTournamentId: tournamentId,
@@ -1295,6 +1328,46 @@ export default function App() {
                     </div>
                   )}
               </fieldset>
+              {(match.status !== 'completed' || match.recapContext) && (
+                <details className="game-context">
+                  <summary>
+                    Game context
+                    {match.status !== 'completed' ? ' (optional)' : ''}
+                  </summary>
+                  <label htmlFor={`game-context-${match.id}`}>
+                    Context for the AI recap
+                  </label>
+                  <textarea
+                    id={`game-context-${match.id}`}
+                    rows={3}
+                    maxLength={MAX_GAME_CONTEXT_LENGTH}
+                    placeholder="Last game of the season, first game for this Roots team…"
+                    value={
+                      contextDrafts.current.get(match.id) ??
+                      match.recapContext ??
+                      ''
+                    }
+                    readOnly={
+                      match.status === 'completed' ||
+                      !canScoreGame(data, match.id)
+                    }
+                    onChange={(e) =>
+                      editGameContext(match.id, e.currentTarget.value)
+                    }
+                  />
+                  <small>
+                    {match.status === 'completed'
+                      ? 'Saved with the completed game.'
+                      : !canScoreGame(data, match.id)
+                        ? 'Only the active scorekeeper can edit these notes.'
+                        : contextDrafts.current.has(match.id)
+                          ? 'Saving game context…'
+                          : 'Saved automatically. You can edit until you complete the match.'}{' '}
+                    These notes help shape the AI recap and may appear in the
+                    shared recap.
+                  </small>
+                </details>
+              )}
               {sets.length > 0 && (
                 <section className="set-history">
                   <h2>
@@ -1664,21 +1737,37 @@ export default function App() {
               </>
             )}
             {modal.kind === 'newMatch' && (
-              <MatchSetup
-                initialSport={
-                  sportFilter === 'football' ? 'football' : 'volleyball'
-                }
-                teams={libraryTeams}
-                defaultTeamId={
-                  data.tournaments.find((t) => t.id === modal.tournamentId)
-                    ?.defaultTeamId
-                }
-                defaultTeamName={
-                  data.tournaments.find((t) => t.id === modal.tournamentId)
-                    ?.defaultTeamName
-                }
-                onLoading={setLogoLoading}
-              />
+              <>
+                <MatchSetup
+                  initialSport={
+                    sportFilter === 'football' ? 'football' : 'volleyball'
+                  }
+                  teams={libraryTeams}
+                  defaultTeamId={
+                    data.tournaments.find((t) => t.id === modal.tournamentId)
+                      ?.defaultTeamId
+                  }
+                  defaultTeamName={
+                    data.tournaments.find((t) => t.id === modal.tournamentId)
+                      ?.defaultTeamName
+                  }
+                  onLoading={setLogoLoading}
+                />
+                <label htmlFor="new-game-context">
+                  Game context (optional)
+                </label>
+                <textarea
+                  id="new-game-context"
+                  name="recapContext"
+                  rows={3}
+                  maxLength={MAX_GAME_CONTEXT_LENGTH}
+                  placeholder="Last game of the season, first game for this Roots team…"
+                />
+                <small>
+                  Help the AI tell the story. You can edit these notes until you
+                  complete the match; they may appear in the shared recap.
+                </small>
+              </>
             )}
             {modal.kind === 'endSet' &&
               (() => {

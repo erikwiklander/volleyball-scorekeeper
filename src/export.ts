@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   actions,
+  MAX_GAME_CONTEXT_LENGTH,
   footballScores,
   sportOf,
   id,
@@ -54,6 +55,7 @@ export const matchSchema = z.object({
   away: appearanceSchema.optional(),
   homeTeam: text,
   awayTeam: text,
+  recapContext: z.string().max(MAX_GAME_CONTEXT_LENGTH).optional(),
   homeColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)

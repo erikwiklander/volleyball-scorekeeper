@@ -1230,3 +1230,29 @@ dialog.sync-white {
   margin: 8px 0 0;
   line-height: 1.6;
 }
+
+.game-context {
+  margin: 20px 0;
+}
+.game-context summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.game-context label {
+  margin-top: 14px;
+}
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+  padding: 12px;
+  border: 1px solid #cbd1c6;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+}
+textarea[readonly] {
+  background: #f6f5ef;
+}

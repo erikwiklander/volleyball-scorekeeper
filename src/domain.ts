@@ -52,6 +52,7 @@ export interface Tournament {
   createdAt: string;
   updatedAt: string;
 }
+export const MAX_GAME_CONTEXT_LENGTH = 1000;
 export interface Match {
   sport?: Sport;
   id: string;
@@ -60,6 +61,7 @@ export interface Match {
   away?: MatchTeam;
   homeTeam: string;
   awayTeam: string;
+  recapContext?: string;
   homeColor?: string;
   awayColor?: string;
   status: 'not_started' | 'in_progress' | 'completed';
@@ -344,6 +346,24 @@ export function endSet(
     activeMatchId: matchId,
   };
 }
+export function setGameContext(
+  data: Snapshot,
+  matchId: string,
+  value: string,
+  at: number,
+) {
+  const match = data.matches.find((m) => m.id === matchId);
+  if (!match || match.status === 'completed')
+    throw new Error('Game context is locked after the match is completed.');
+  if (value.length > MAX_GAME_CONTEXT_LENGTH)
+    throw new Error(
+      `Keep game context to ${MAX_GAME_CONTEXT_LENGTH} characters.`,
+    );
+  if (value.trim()) match.recapContext = value;
+  else delete match.recapContext;
+  match.updatedAt = new Date(at).toISOString();
+}
+
 export function completeMatch(data: Snapshot, matchId: string, at: number) {
   const match = data.matches.find((m) => m.id === matchId);
   if (

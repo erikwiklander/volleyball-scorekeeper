@@ -23,7 +23,7 @@ export default function Recap({
               setText(
                 value?.scoreKey === scoreKey &&
                   typeof value?.text === 'string' &&
-                  value.text.length <= 650
+                  value.text.length <= 1200
                   ? value.text
                   : '',
               );

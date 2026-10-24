@@ -19,7 +19,14 @@ test('complete courtside workflow survives reload and works offline', async ({
   await page.getByLabel('Away team', { exact: true }).fill('Manor');
   await page.getByLabel('Home team color', { exact: true }).fill('#ffcc00');
   await page.getByLabel('Away team color', { exact: true }).fill('#003399');
+  await page
+    .getByLabel('Game context (optional)', { exact: true })
+    .fill('Last game of the school season.');
   await page.getByRole('button', { name: 'Create match' }).click();
+  await page.locator('.game-context summary').click();
+  await expect(
+    page.getByLabel('Context for the AI recap', { exact: true }),
+  ).toHaveValue('Last game of the school season.');
   await page.getByRole('button', { name: 'Start Set 1' }).click();
   const home = page.getByRole('button', { name: 'Add point for Vandegrift' });
   const away = page.getByRole('button', { name: 'Add point for Manor' });
@@ -81,12 +88,29 @@ test('complete courtside workflow survives reload and works offline', async ({
     fullPage: true,
   });
   await context.setOffline(true);
+  if (
+    !(await page
+      .getByLabel('Context for the AI recap', { exact: true })
+      .isVisible())
+  )
+    await page.locator('.game-context summary').click();
+  await page
+    .getByLabel('Context for the AI recap', { exact: true })
+    .fill('Last game of the school season, with a family celebration planned.');
+  await expect(page.locator('.game-context small')).toContainText(
+    'Saved automatically.',
+  );
   // WebKit offline navigation is blocked by Playwright issue #42775.
   // Both engines test reload recovery online and the remaining actions offline.
   if (browserName !== 'webkit') {
     await page.reload();
     await page.getByRole('button', { name: 'Resume match' }).click();
   }
+  await expect(
+    page.getByLabel('Context for the AI recap', { exact: true }),
+  ).toHaveValue(
+    'Last game of the school season, with a family celebration planned.',
+  );
   await home.click();
   await expect(home.locator('.score')).toHaveText('2');
   await page.getByRole('button', { name: 'End set', exact: true }).click();
@@ -103,6 +127,15 @@ test('complete courtside workflow survives reload and works offline', async ({
     .getByRole('dialog')
     .getByRole('button', { name: 'End set', exact: true })
     .click();
+  if (
+    !(await page
+      .getByLabel('Context for the AI recap', { exact: true })
+      .isVisible())
+  )
+    await page.locator('.game-context summary').click();
+  await page
+    .getByLabel('Context for the AI recap', { exact: true })
+    .fill('Last game of the school season. The final note before closing.');
   await page
     .getByRole('button', { name: 'Complete match', exact: true })
     .click();
@@ -111,6 +144,14 @@ test('complete courtside workflow survives reload and works offline', async ({
     .getByRole('button', { name: 'Complete match', exact: true })
     .click();
   await expect(page.getByText('MATCH COMPLETE', { exact: true })).toBeVisible();
+  await expect(
+    page.getByLabel('Context for the AI recap', { exact: true }),
+  ).toHaveValue(
+    'Last game of the school season. The final note before closing.',
+  );
+  await expect(
+    page.getByLabel('Context for the AI recap', { exact: true }),
+  ).not.toBeEditable();
   await page.getByRole('button', { name: 'View events' }).click();
   await expect(page.locator('.event-list')).toContainText('undo');
   await expect(page.locator('.event-list')).toContainText('sync marker');
@@ -143,6 +184,9 @@ test('complete courtside workflow survives reload and works offline', async ({
   if (browserName === 'webkit') await context.setOffline(false);
   const backupPath = (await backup.path())!;
   expect(JSON.parse(await readFile(backupPath, 'utf8')).schemaVersion).toBe(2);
+  expect(
+    JSON.parse(await readFile(backupPath, 'utf8')).matches[0].recapContext,
+  ).toBe('Last game of the school season. The final note before closing.');
   await page.getByLabel('Import backup').setInputFiles({
     name: 'tournament.json',
     mimeType: 'application/json',
